@@ -234,13 +234,20 @@ if "gemini_client" not in st.session_state:
     if "gcp_service_account" in st.secrets:
       sa_info = dict(st.secrets["gcp_service_account"])
       
-      # Robust private key sanitization & padding fixer
+      # Bulletproof PEM Normalizer & Base64 Padding Auto-Fixer
       if "private_key" in sa_info and isinstance(sa_info["private_key"], str):
         pk = sa_info["private_key"].strip()
         pk = pk.replace("\\n", "\n")
         pk = pk.replace("...", "")
-        lines = [line.strip() for line in pk.splitlines() if line.strip()]
-        pk = "\n" + "\n".join(lines) + "\n"
+        if "BEGIN PRIVATE KEY" in pk:
+          lines = pk.splitlines()
+          body_lines = [l.strip() for l in lines if not l.startswith("-----")]
+          body = "".join(body_lines)
+          missing_padding = len(body) % 4
+          if missing_padding:
+            body += "=" * (4 - missing_padding)
+          wrapped_body = "\n".join(body[i:i+64] for i in range(0, len(body), 64))
+          pk = f"-----BEGIN PRIVATE KEY-----\n{wrapped_body}\n-----END PRIVATE KEY-----\n"
         sa_info["private_key"] = pk
 
       project = st.secrets.get("GOOGLE_CLOUD_PROJECT", "gen-lang-client-0874490944")
@@ -273,164 +280,4 @@ def iso_digest_and_categorize(
         "Perform rigorous ISO-compliant information extraction,"
         " deduplication, and standardization on the provided source content."
         " 1. Extract ONLY novel, permanent insights, architecture, code, and"
-        " operational facts. Discard chatter. 2. If the content is 100%"
-        " redundant relative to the existing vault, output 'DUPLICATE' for the"
-        " domain. 3. Otherwise, categorize into one of these strict ISO"
-        f" Knowledge Domains: {', '.join(ISO_DOMAINS)} (or propose a precise new"
-        " ISO-aligned domain name if it represents a distinct discipline).\n4."
-        " Calculate an automated confidence score (e.g., '98.5%') based on"
-        " information density and clarity.\n5. Assign 2-3 validation tags (e.g.,"
-        " ['High Fidelity', 'Zero Redundancy', 'ISO 30401 Compliant']).\n6."
-        " Format the output digest in clean Markdown using ISO documentation"
-        " standards (Objective, Scope, Technical Specifications, Operational"
-        " Procedures).\nReturn strictly JSON with keys: 'domain' (string),"
-        " 'confidence' (string), 'tags' (list of strings), and 'digest'"
-        " (Markdown string).\n\nExisting Knowledge Vault:\n"
-        f"{existing_vault[:3000]}\n\nSource Content to Process:\n"
-        f"{content_text[:6000]}"
-    )
-    response = client.models.generate_content(
-        model="gemini-2.5-flash", contents=prompt
-    )
-    text = response.text.strip()
-    if "```json" in text:
-      text = text.split("```json")[1].split("```")[0].strip()
-    elif "```" in text:
-      text = text.split("```")[1].split("```")[0].strip()
-    return json.loads(text)
-  except Exception:
-    return {
-        "domain": ISO_DOMAINS[0],
-        "confidence": "85.0%",
-        "tags": ["Fallback Extraction", "Review Recommended"],
-        "digest": "# ISO Knowledge Record\n\nFallback extraction complete.",
-    }
-
-
-# --- Sidebar: Enterprise Control Center ---
-st.sidebar.title("🏛️ C-SPACE Enterprise Hub")
-st.sidebar.markdown("Automated Real-Time ISO Digestion & Standardization")
-
-# Programmatic API Cloud Sync Trigger
-if st.sidebar.button(
-    "🔄 Sync Historical Streams via Gemini API", type="primary"
-):
-  with st.spinner("Querying Gemini API backend for historical streams..."):
-    try:
-      master_vault = get_master_vault_text()
-      response = st.session_state.gemini_client.models.generate_content(
-          model="gemini-2.5-flash",
-          contents=(
-              "Review our active project history, architecture designs, and"
-              " engineering rules. Extract all core technical findings into a"
-              " structured summary."
-          ),
-      )
-      if response and response.text:
-        result = iso_digest_and_categorize(
-            st.session_state["gemini_client"], response.text, master_vault
-        )
-        domain_res = result.get("domain", ISO_DOMAINS[0])
-        confidence_res = result.get("confidence", "96.0%")
-        tags_res = result.get(
-            "tags", ["Programmatic API Sync", "Zero-Upload Verified"]
-        )
-        if domain_res != "DUPLICATE":
-          repo_id = f"api_sync_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-          pure_record = [{
-              "role": "model",
-              "parts": [{
-                  "text": (
-                      "# [PROGRAMMATIC API SYNC RECORD — Domain:"
-                      f" {domain_res} | Confidence:"
-                      f" {confidence_res}]\n\n{result.get('digest')}"
-                  )
-              }],
-          }]
-          save_repository_data(
-              repo_id,
-              domain_res,
-              digested=True,
-              confidence=confidence_res,
-              tags=tags_res,
-              history=pure_record,
-          )
-          st.sidebar.success(
-              f"Successfully synced repository [{repo_id}] into [{domain_res}]!"
-          )
-          st.rerun()
-        else:
-          st.sidebar.info(
-              "Sync complete: Content was determined to be redundant."
-          )
-    except Exception as e:
-      st.sidebar.error(f"Sync failed: {e}")
-
-st.sidebar.markdown("---")
-
-repos_by_domain = list_repositories()
-if not repos_by_domain:
-  save_repository_data(
-      "iso_baseline_stream",
-      ISO_DOMAINS[0],
-      digested=False,
-      confidence="N/A",
-      tags=["Baseline"],
-      history=[],
-  )
-  repos_by_domain = {ISO_DOMAINS[0]: [("iso_baseline_stream", {})]}
-
-flat_repo_ids = [
-    rid for domain, items in repos_by_domain.items() for rid, data in items
-]
-if (
-    "current_repo" not in st.session_state
-    or st.session_state["current_repo"] not in flat_repo_ids
-):
-  st.session_state["current_repo"] = flat_repo_ids[0]
-
-current_repo = st.session_state["current_repo"]
-current_data = load_repository_data(current_repo)
-
-st.sidebar.subheader("📂 ISO Knowledge Repositories")
-for domain, items in repos_by_domain.items():
-  with st.sidebar.expander(f"📁 {domain} ({len(items)})", expanded=True):
-    for rid, data in items:
-      status = (
-          "🟢 ISO Standardized" if data.get("digested") else "🟡 Raw / Active"
-      )
-      if st.button(
-          f"{rid} [{status}]",
-          key=f"btn_{rid}",
-          type=(
-              "primary"
-              if rid == st.session_state["current_repo"]
-              else "secondary"
-          ),
-      ):
-        st.session_state["current_repo"] = rid
-        st.rerun()
-
-# --- Export Section ---
-st.sidebar.markdown("---")
-st.sidebar.subheader("💾 Export & Backup")
-
-if os.path.exists(DB_FILE):
-  with open(DB_FILE, "rb") as f:
-    db_bytes = f.read()
-  st.sidebar.download_button(
-      label="Download SQLite DB",
-      data=db_bytes,
-      file_name="c_space_iso_enterprise.db",
-      mime="application/x-sqlite3",
-  )
-
-zip_data = generate_structured_zip()
-st.sidebar.download_button(
-    label="📦 Export ZIP Bundle (.md)",
-    data=zip_data,
-    file_name="c_space_iso_markdown_bundle.zip",
-    mime="application/zip",
-)
-
-# ---
+        " operational facts. Discard chatter. 2. If the content is 1
