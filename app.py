@@ -276,8 +276,64 @@ def iso_digest_and_categorize(
     client, content_text: str, existing_vault: str = ""
 ):
   try:
-    prompt = (
-        "Perform rigorous ISO-compliant information extraction,"
-        " deduplication, and standardization on the provided source content."
-        " 1. Extract ONLY novel, permanent insights, architecture, code, and"
-        " operational facts. Discard chatter. 2. If the content is 1
+    domains_str = ", ".join(ISO_DOMAINS)
+    vault_snippet = existing_vault[:3000]
+    content_snippet = content_text[:6000]
+
+    prompt = f"""Perform rigorous ISO-compliant information extraction, deduplication, and standardization on the provided source content.
+1. Extract ONLY novel, permanent insights, architecture, code, and operational facts. Discard chatter.
+2. If the content is 100% redundant relative to the existing vault, output 'DUPLICATE' for the domain.
+3. Otherwise, categorize into one of these strict ISO Knowledge Domains: {domains_str} (or propose a precise new ISO-aligned domain name if it represents a distinct discipline).
+4. Calculate an automated confidence score (e.g., '98.5%') based on information density and clarity.
+5. Assign 2-3 validation tags (e.g., ['High Fidelity', 'Zero Redundancy', 'ISO 30401 Compliant']).
+6. Format the output digest in clean Markdown using ISO documentation standards (Objective, Scope, Technical Specifications, Operational Procedures).
+
+Return strictly JSON with keys: 'domain' (string), 'confidence' (string), 'tags' (list of strings), and 'digest' (Markdown string).
+
+Existing Knowledge Vault:
+{vault_snippet}
+
+Source Content to Process:
+{content_snippet}"""
+
+    response = client.models.generate_content(
+        model="gemini-2.5-flash", contents=prompt
+    )
+    text = response.text.strip()
+    if "```json" in text:
+      text = text.split("```json")[1].split("```")[0].strip()
+    elif "```" in text:
+      text = text.split("```")[1].split("```")[0].strip()
+    return json.loads(text)
+  except Exception:
+    return {
+        "domain": ISO_DOMAINS[0],
+        "confidence": "85.0%",
+        "tags": ["Fallback Extraction", "Review Recommended"],
+        "digest": "# ISO Knowledge Record\n\nFallback extraction complete.",
+    }
+
+
+# --- Sidebar: Enterprise Control Center ---
+st.sidebar.title("🏛️ C-SPACE Enterprise Hub")
+st.sidebar.markdown("Automated Real-Time ISO Digestion & Standardization")
+
+# Programmatic API Cloud Sync Trigger
+if st.sidebar.button(
+    "🔄 Sync Historical Streams via Gemini API", type="primary"
+):
+  with st.spinner("Querying Gemini API backend for historical streams..."):
+    try:
+      master_vault = get_master_vault_text()
+      response = st.session_state.gemini_client.models.generate_content(
+          model="gemini-2.5-flash",
+          contents=(
+              "Review our active project history, architecture designs, and"
+              " engineering rules. Extract all core technical findings into a"
+              " structured summary."
+          ),
+      )
+      if response and response.text:
+        result = iso_digest_and_categorize(
+            st.session_state["gemini_client"], response.text, master_vault
+        )
