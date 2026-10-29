@@ -6,6 +6,7 @@ import zipfile
 from datetime import datetime
 import streamlit as st
 from google import genai
+from google.oauth2 import service_account
 
 # --- Page Configuration ---
 st.set_page_config(
@@ -227,14 +228,31 @@ def generate_structured_zip():
   return buffer.getvalue()
 
 
-# --- AI Engine Client Initialization ---
+# --- AI Engine Client Initialization (GCP Vertex AI Service Account Support) ---
 if "gemini_client" not in st.session_state:
-  api_key = (
-      st.secrets.get("GEMINI_API_KEY")
-      if "GEMINI_API_KEY" in st.secrets
-      else os.getenv("GEMINI_API_KEY")
-  )
-  st.session_state.gemini_client = genai.Client(api_key=api_key)
+  try:
+    if "gcp_service_account" in st.secrets:
+      sa_info = dict(st.secrets["gcp_service_account"])
+      project = st.secrets.get("GOOGLE_CLOUD_PROJECT", "gen-lang-client-0874490944")
+      location = st.secrets.get("GOOGLE_CLOUD_LOCATION", "us-central1")
+      credentials = service_account.Credentials.from_service_account_info(sa_info)
+      st.session_state.gemini_client = genai.Client(
+          vertexai=True,
+          project=project,
+          location=location,
+          credentials=credentials
+      )
+    elif "GEMINI_API_KEY" in st.secrets:
+      st.session_state.gemini_client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
+    else:
+      api_key = os.getenv("GEMINI_API_KEY")
+      if api_key:
+        st.session_state.gemini_client = genai.Client(api_key=api_key)
+      else:
+        st.session_state.gemini_client = genai.Client()
+  except Exception as e:
+    st.error(f"Failed to initialize Gemini client with GCP credentials: {e}")
+    st.stop()
 
 
 def iso_digest_and_categorize(
