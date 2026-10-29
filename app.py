@@ -238,7 +238,6 @@ if "gemini_client" not in st.session_state:
       if "private_key" in sa_info and isinstance(sa_info["private_key"], str):
         pk = sa_info["private_key"].strip()
         pk = pk.replace("\\n", "\n")
-        # Remove any extraneous text/placeholders if present
         pk = pk.replace("...", "")
         lines = [line.strip() for line in pk.splitlines() if line.strip()]
         pk = "\n" + "\n".join(lines) + "\n"
@@ -333,4 +332,105 @@ if st.sidebar.button(
         )
         domain_res = result.get("domain", ISO_DOMAINS[0])
         confidence_res = result.get("confidence", "96.0%")
-        tags_res = result.get
+        tags_res = result.get(
+            "tags", ["Programmatic API Sync", "Zero-Upload Verified"]
+        )
+        if domain_res != "DUPLICATE":
+          repo_id = f"api_sync_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+          pure_record = [{
+              "role": "model",
+              "parts": [{
+                  "text": (
+                      "# [PROGRAMMATIC API SYNC RECORD — Domain:"
+                      f" {domain_res} | Confidence:"
+                      f" {confidence_res}]\n\n{result.get('digest')}"
+                  )
+              }],
+          }]
+          save_repository_data(
+              repo_id,
+              domain_res,
+              digested=True,
+              confidence=confidence_res,
+              tags=tags_res,
+              history=pure_record,
+          )
+          st.sidebar.success(
+              f"Successfully synced repository [{repo_id}] into [{domain_res}]!"
+          )
+          st.rerun()
+        else:
+          st.sidebar.info(
+              "Sync complete: Content was determined to be redundant."
+          )
+    except Exception as e:
+      st.sidebar.error(f"Sync failed: {e}")
+
+st.sidebar.markdown("---")
+
+repos_by_domain = list_repositories()
+if not repos_by_domain:
+  save_repository_data(
+      "iso_baseline_stream",
+      ISO_DOMAINS[0],
+      digested=False,
+      confidence="N/A",
+      tags=["Baseline"],
+      history=[],
+  )
+  repos_by_domain = {ISO_DOMAINS[0]: [("iso_baseline_stream", {})]}
+
+flat_repo_ids = [
+    rid for domain, items in repos_by_domain.items() for rid, data in items
+]
+if (
+    "current_repo" not in st.session_state
+    or st.session_state["current_repo"] not in flat_repo_ids
+):
+  st.session_state["current_repo"] = flat_repo_ids[0]
+
+current_repo = st.session_state["current_repo"]
+current_data = load_repository_data(current_repo)
+
+st.sidebar.subheader("📂 ISO Knowledge Repositories")
+for domain, items in repos_by_domain.items():
+  with st.sidebar.expander(f"📁 {domain} ({len(items)})", expanded=True):
+    for rid, data in items:
+      status = (
+          "🟢 ISO Standardized" if data.get("digested") else "🟡 Raw / Active"
+      )
+      if st.button(
+          f"{rid} [{status}]",
+          key=f"btn_{rid}",
+          type=(
+              "primary"
+              if rid == st.session_state["current_repo"]
+              else "secondary"
+          ),
+      ):
+        st.session_state["current_repo"] = rid
+        st.rerun()
+
+# --- Export Section ---
+st.sidebar.markdown("---")
+st.sidebar.subheader("💾 Export & Backup")
+
+if os.path.exists(DB_FILE):
+  with open(DB_FILE, "rb") as f:
+    db_bytes = f.read()
+  st.sidebar.download_button(
+      label="Download SQLite DB",
+      data=db_bytes,
+      file_name="c_space_iso_enterprise.db",
+      mime="application/x-sqlite3",
+  )
+
+zip_data = generate_structured_zip()
+st.sidebar.download_button(
+    label="📦 Export ZIP Bundle (.md)",
+    data=zip_data,
+    file_name="c_space_iso_markdown_bundle.zip",
+    mime="application/zip",
+)
+
+# ---
