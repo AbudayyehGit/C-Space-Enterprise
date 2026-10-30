@@ -180,4 +180,60 @@ with tab1:
                   content,
                   parsed.get("summary", ""),
                   float(parsed.get("confidence_score", 0.0)),
-                  parsed.get("iso_category",
+                  parsed.get("iso_category", "General"),
+                  datetime.utcnow().isoformat(),
+              ),
+          )
+          conn.commit()
+
+          log_audit("DIGESTION_SUCCESS", f"Processed file: {file.name}")
+          results.append(
+              {
+                  "filename": file.name,
+                  "status": "Success",
+                  "category": parsed.get("iso_category"),
+              }
+          )
+
+        except Exception as e:
+          log_audit("DIGESTION_ERROR", f"Failed file {file.name}: {str(e)}")
+          results.append(
+              {"filename": file.name, "status": f"Error: {str(e)}"}
+          )
+
+        progress_bar.progress((idx + 1) / len(uploaded_files))
+
+      st.success("Batch digestion complete!")
+      st.json(results)
+
+with tab2:
+  st.subheader("Digested Knowledge Repository")
+  cursor.execute(
+      "SELECT id, filename, iso_category, confidence_score, timestamp FROM"
+      " documents ORDER BY timestamp DESC"
+  )
+  rows = cursor.fetchall()
+
+  if rows:
+    for row in rows:
+      with st.expander(f"📁 {row[1]} [{row[2]}] - Confidence: {row[3]}"):
+        st.write(f"**Processed Timestamp:** {row[4]}")
+        cursor.execute(
+            "SELECT summary, content FROM documents WHERE id = ?", (row[0],)
+        )
+        doc_data = cursor.fetchone()
+        st.markdown(f"**Summary:** {doc_data[0]}")
+        st.text_area(
+            "Original Content",
+            doc_data[1],
+            height=150,
+            key=f"content_{row[0]}",
+        )
+  else:
+    st.info("No documents digested yet.")
+
+with tab3:
+  st.subheader("ISO 9001 Compliance Audit Trail")
+  cursor.execute(
+      "SELECT action, details, timestamp FROM audit_trail ORDER BY timestamp"
+      " DESC LIMIT 50
