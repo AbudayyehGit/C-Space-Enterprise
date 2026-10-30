@@ -27,49 +27,62 @@ st.caption(
 
 
 @st.cache_resource
-def init_vertex_client():
+def init_vertex_client_from_dict(sa_dict):
   try:
-    if "GCP_SA_JSON" in st.secrets:
-      sa_json_str = st.secrets["GCP_SA_JSON"]
-      sa_dict = json.loads(sa_json_str)
+    if "private_key" in sa_dict:
+      # Universally normalize escaped backslash-n to actual newlines
+      sa_dict["private_key"] = sa_dict["private_key"].replace("\\n", "\n")
 
-      # Ensure private key escaped newlines are properly normalized
-      if "private_key" in sa_dict:
-        sa_dict["private_key"] = sa_dict["private_key"].replace("\\n", "\n")
+    with tempfile.NamedTemporaryFile(
+        mode="w", delete=False, suffix=".json"
+    ) as tmp:
+      json.dump(sa_dict, tmp)
+      tmp_path = tmp.name
 
-      # Write normalized dict to temp file, bypassing TOML table parsing bugs
-      with tempfile.NamedTemporaryFile(
-          mode="w", delete=False, suffix=".json"
-      ) as tmp:
-        json.dump(sa_dict, tmp)
-        tmp_path = tmp.name
-
-      creds = service_account.Credentials.from_service_account_file(tmp_path)
-
-      client = genai.Client(
-          vertexai=True,
-          project=sa_dict["project_id"],
-          location="us-central1",
-          credentials=creds,
-      )
-      return client, "Connected via GCP Service Account (Vertex AI Credits)"
-    else:
-      return None, "Error: 'GCP_SA_JSON' missing from Streamlit secrets."
+    creds = service_account.Credentials.from_service_account_file(tmp_path)
+    client = genai.Client(
+        vertexai=True,
+        project=sa_dict["project_id"],
+        location="us-central1",
+        credentials=creds,
+    )
+    return client, "Connected via GCP Service Account (Vertex AI Credits)"
   except Exception as e:
-    return None, f"Authentication Error: {str(e)}"
+    return None, f"Auth Error: {str(e)}"
 
 
-client, auth_status = init_vertex_client()
+client = None
+auth_status = "Awaiting Authentication"
 
 with st.sidebar:
   st.header("System Status")
+
+  # 1. Try loading from st.secrets automatically
+  if "GCP_SA_JSON" in st.secrets:
+    try:
+      sa_dict = json.loads(st.secrets["GCP_SA_JSON"])
+      client, auth_status = init_vertex_client_from_dict(sa_dict)
+    except Exception as e:
+      auth_status = f"Secrets Error: {str(e)}"
+
+  # 2. Fallback: Direct JSON file upload in sidebar
+  if not client:
+    st.warning("Upload your downloaded GCP service_account.json below:")
+    uploaded_sa_file = st.file_uploader(
+        "GCP Service Account JSON", type=["json"]
+    )
+    if uploaded_sa_file:
+      try:
+        sa_dict = json.load(uploaded_sa_file)
+        client, auth_status = init_vertex_client_from_dict(sa_dict)
+      except Exception as e:
+        auth_status = f"File Upload Error: {str(e)}"
+
   if client:
     st.success(auth_status)
   else:
     st.error(auth_status)
-    st.stop()
-  st.markdown("---")
-  st.info("Target: GCP Trial Credits ($300 Pool)")
+    st.info("Upload your service account JSON above to activate Vertex AI.")
 
 
 # ==========================================
@@ -129,7 +142,9 @@ with tab1:
   )
 
   if st.button("Execute Batch Digestion", type="primary"):
-    if not uploaded_files:
+    if not client:
+      st.error("Vertex AI client not connected. Please upload your service account JSON in the sidebar.")
+    elif not uploaded_files:
       st.warning("Please upload at least one document.")
     else:
       progress_bar = st.progress(0)
@@ -146,20 +161,17 @@ with tab1:
         )
 
         try:
-          # Call Vertex AI model using Gemini 2.5 Flash
           response = client.models.generate_content(
               model="gemini-2.5-flash",
               contents=prompt,
           )
 
-          # Parse response text
           raw_text = response.text.strip()
           if raw_text.startswith("```json"):
             raw_text = raw_text[7:-3].strip()
 
           parsed = json.loads(raw_text)
 
-          # Save to SQLite
           cursor.execute(
               """
                         INSERT INTO documents (filename, content, summary, confidence_score, iso_category, timestamp)
