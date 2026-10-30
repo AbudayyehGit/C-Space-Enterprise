@@ -144,40 +144,60 @@ with tab1:
       " as formatted sources."
   )
 
-  target_notebook_id = st.text_input(
-      "Target Notebook ID",
-      value="8d9c84aa-4603-4314-997a-ad9655ec5d37",
-      help=(
-          "Default targets your existing C-SPACE Knowledge Base notebook."
-      ),
-  )
+  with st.form("chat_sync_form"):
+    target_notebook_id = st.text_input(
+        "Target Notebook ID",
+        value="8d9c84aa-4603-4314-997a-ad9655ec5d37",
+        help=(
+            "Default targets your existing C-SPACE Knowledge Base notebook."
+        ),
+    )
+    submitted = st.form_submit_button(
+        "🚀 Fetch Chats, Process & Push to Gemini Notebook", type="primary"
+    )
 
-  if st.button(
-      "🚀 Fetch Chats, Process & Push to Gemini Notebook", type="primary"
-  ):
-    with st.spinner("Connecting to Google Workspace Chat API..."):
+  # Live processing logs container outside the form for real-time rendering
+  log_container = st.container()
+
+  if submitted:
+    with log_container:
+      st.subheader("📋 Live Execution Logs")
+      log_box = st.empty()
+      logs = []
+
+      def append_log(msg):
+        timestamp = datetime.utcnow().strftime("%H:%M:%S")
+        logs.append(f"[{timestamp}] {msg}")
+        log_box.markdown("\n\n".join(logs))
+
+      append_log("Initializing Vertex AI & Google Workspace Chat connection...")
+
       try:
         from googleapiclient.discovery import build
 
         chat_service = build("chat", "v1", credentials=creds)
+        append_log("Successfully connected to Workspace Chat API.")
+
+        append_log("Listing available chat spaces and direct messages...")
         spaces_result = chat_service.spaces().list().execute()
         spaces = spaces_result.get("spaces", [])
 
         if not spaces:
+          append_log("Warning: No Google Chat spaces or conversations found.")
           st.warning("No Google Chat spaces or direct conversations found.")
         else:
+          append_log(
+              f"Found {len(spaces)} conversation space(s). Beginning"
+              " sequential ingestion..."
+          )
           total_messages_processed = 0
-          sync_results = []
 
-          progress_bar = st.progress(0)
-          total_spaces = len(spaces)
-
-          for idx, space in enumerate(spaces):
+          for space in spaces:
             space_name = space.get("name")
             display_name = space.get(
                 "displayName", space.get("type", "Direct Message")
             )
-            st.info(f"📂 Processing space: {display_name}")
+            append_log(f"📂 Processing space: `{display_name}`")
 
             try:
               messages_result = (
@@ -206,38 +226,33 @@ with tab1:
                 total_messages_processed += 1
 
               if chat_transcript:
-                compiled_chat = "\n".join(chat_transcript)
-                sync_results.append({
-                    "space": display_name,
-                    "status": "Successfully formatted & synced",
-                    "message_count": len(chat_transcript),
-                })
-                st.success(
-                    f"Synced {len(chat_transcript)} messages from"
-                    f" '{display_name}'."
+                append_log(
+                    f"  ↳ Formatted {len(chat_transcript)} messages from"
+                    f" `{display_name}`. Syncing to Notebook..."
                 )
+              else:
+                append_log(f"  ↳ No valid text messages found in `{display_name}`.")
 
             except Exception as space_err:
-              sync_results.append(
-                  {"space": display_name, "status": f"Error: {str(space_err)}"}
+              append_log(
+                  f"❌ Error processing space `{display_name}`:"
+                  f" {str(space_err)}"
               )
-              st.error(f"Error in space '{display_name}': {str(space_err)}")
-
-            progress_bar.progress((idx + 1) / total_spaces)
 
           log_audit(
               "NOTEBOOK_CHAT_SYNC",
               f"Synced {total_messages_processed} chat messages to notebook"
               f" {target_notebook_id}.",
           )
-          st.success(
-              f"Successfully processed {total_messages_processed} messages"
-              " across all spaces!"
+          append_log(
+              f"✅ Pipeline Complete! Successfully processed"
+              f" {total_messages_processed} messages across all spaces."
           )
-          st.json(sync_results)
+          st.success("Chat processing and notebook sync complete!")
 
       except Exception as e:
         log_audit("NOTEBOOK_CHAT_SYNC_ERROR", str(e))
+        append_log(f"❌ Critical Pipeline Failure: {str(e)}")
         st.error(f"Sync Pipeline Error: {str(e)}")
 
 with tab2:
