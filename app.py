@@ -29,14 +29,15 @@ st.caption(
 @st.cache_resource
 def init_vertex_client():
   try:
-    if "gcp_service_account" in st.secrets:
-      sa_dict = dict(st.secrets["gcp_service_account"])
+    if "GCP_SA_JSON" in st.secrets:
+      sa_json_str = st.secrets["GCP_SA_JSON"]
+      sa_dict = json.loads(sa_json_str)
 
-      # Write secrets dict to a temporary JSON file to bypass TOML multiline/PEM parsing bugs
+      # Write exact raw JSON string to temp file, bypassing TOML formatting bugs
       with tempfile.NamedTemporaryFile(
           mode="w", delete=False, suffix=".json"
       ) as tmp:
-        json.dump(sa_dict, tmp)
+        tmp.write(sa_json_str)
         tmp_path = tmp.name
 
       creds = service_account.Credentials.from_service_account_file(tmp_path)
@@ -49,7 +50,7 @@ def init_vertex_client():
       )
       return client, "Connected via GCP Service Account (Vertex AI Credits)"
     else:
-      return None, "Error: 'gcp_service_account' missing from Streamlit secrets."
+      return None, "Error: 'GCP_SA_JSON' missing from Streamlit secrets."
   except Exception as e:
     return None, f"Authentication Error: {str(e)}"
 
