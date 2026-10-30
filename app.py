@@ -29,7 +29,6 @@ st.caption(
 def init_vertex_client():
   try:
     if "gcp_private_key" in st.secrets:
-      # Use the exact raw string from secrets with standard newline unescaping
       private_key = st.secrets["gcp_private_key"]
       if "\\n" in private_key:
         private_key = private_key.replace("\\n", "\n")
@@ -215,8 +214,12 @@ with tab2:
         )
         doc_data = cursor.fetchone()
         st.markdown(f"**Summary:** {doc_data[0]}")
-        with st.text_area("Original Content", doc_data[1], height=150, key=f"content_{row[0]}"):
-          pass
+        st.text_area(
+            "Original Content",
+            doc_data[1],
+            height=150,
+            key=f"content_{row[0]}",
+        )
   else:
     st.info("No documents digested yet.")
 
@@ -224,3 +227,11 @@ with tab3:
   st.subheader("ISO 9001 Compliance Audit Trail")
   cursor.execute(
       "SELECT action, details, timestamp FROM audit_trail ORDER BY timestamp"
+      " DESC LIMIT 50"
+  )
+  audit_rows = cursor.fetchall()
+  if audit_rows:
+    for audit in audit_rows:
+      st.text(f"[{audit[2]}] {audit[0]}: {audit[1]}️")
+  else:
+    st.info("Audit log is currently empty.")
