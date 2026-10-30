@@ -18,7 +18,7 @@ st.set_page_config(
 
 st.title("C-SPACE GA#8 Knowledge Management System")
 st.caption(
-    "ISO 9001 Compliant Document Digestion & Vertex AI Knowledge Orchestrator"
+    "ISO 9001 Compliant Document Digestion, Chat Ingestion & Notebook Sync"
 )
 
 # ==========================================
@@ -48,6 +48,7 @@ def init_vertex_client(uploaded_file):
     if not sa_dict:
       return (
           None,
+          None,
           "Awaiting GCP Service Account JSON key upload in the sidebar...",
       )
 
@@ -64,13 +65,13 @@ def init_vertex_client(uploaded_file):
         location="us-central1",
         credentials=creds,
     )
-    return client, f"Connected successfully (Project: {sa_dict['project_id']})"
+    return client, creds, f"Connected successfully (Project: {sa_dict['project_id']})"
 
   except Exception as e:
-    return None, f"Authentication Error: {str(e)}"
+    return None, None, f"Authentication Error: {str(e)}"
 
 
-client, auth_status = init_vertex_client(cred_file)
+client, creds, auth_status = init_vertex_client(cred_file)
 
 with st.sidebar:
   st.markdown("---")
@@ -129,106 +130,43 @@ def log_audit(action, details):
 # 4. MAIN APPLICATION INTERFACE
 # ==========================================
 tab1, tab2, tab3 = st.tabs(
-    ["✍️ Direct Scratchpad", "📊 Knowledge Base", "🛡️ ISO 9001 Audit Trail"]
+    ["💬 Chat to Notebooks Sync", "📊 Knowledge Base", "🛡️ ISO 9001 Audit Trail"]
 )
 
 with tab1:
-  st.subheader("Direct In-Browser Text Digestion")
+  st.subheader(
+      "Direct Google Chat to Gemini Notebooks Ingestion & Processing"
+  )
   st.caption(
-      "Paste your source notes, requirements, or documentation directly below"
-      " for instant zero-file ingestion."
+      "Fetch your account chat spaces sequentially, clean and process each"
+      " thread, and push them directly into your Gemini 📚 [C-SPACE"
+      " Knowledge Base](https://gemini.google.com/notebook/8d9c84aa-4603-4314-997a-ad9655ec5d37)"
+      " as formatted sources."
   )
 
-  doc_title = st.text_input(
-      "Document Title / Identifier", value="ISO-Draft-Note-01"
+  target_notebook_id = st.text_input(
+      "Target Notebook ID",
+      value="8d9c84aa-4603-4314-997a-ad9655ec5d37",
+      help=(
+          "Default targets your existing C-SPACE Knowledge Base notebook."
+      ),
   )
-  scratchpad_content = st.text_area(
-      "Paste Content Here", height=200, placeholder="Enter text..."
-  )
 
-  if st.button("Analyze & Digest Text", type="primary"):
-    if not scratchpad_content.strip():
-      st.warning("Please enter some text to analyze.")
-    else:
-      prompt = (
-          "Analyze the following document for ISO 9001 compliance, provide a"
-          " concise summary, categorize it, and assign a confidence score"
-          " between 0.0 and 1.0. Return strictly in JSON format with keys:"
-          " summary, iso_category, confidence_score.\n\nDocument Content:\n"
-          f"{scratchpad_content}"
-      )
+  if st.button(
+      "🚀 Fetch Chats, Process & Push to Gemini Notebook", type="primary"
+  ):
+    status_text = st.empty()
+    status_text.text("Connecting to Google Workspace Chat API & listing spaces...")
 
-      try:
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=prompt,
-        )
+    try:
+      from googleapiclient.discovery import build
 
-        raw_text = response.text.strip()
-        if raw_text.startswith("```json"):
-          raw_text = raw_text[7:-3].strip()
+      chat_service = build("chat", "v1", credentials=creds)
+      spaces_result = chat_service.spaces().list().execute()
+      spaces = spaces_result.get("spaces", [])
 
-        parsed = json.loads(raw_text)
-
-        cursor.execute(
-            """
-                    INSERT INTO documents (filename, content, summary, confidence_score, iso_category, timestamp)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """,
-            (
-                doc_title,
-                scratchpad_content,
-                parsed.get("summary", ""),
-                float(parsed.get("confidence_score", 0.0)),
-                parsed.get("iso_category", "General"),
-                datetime.utcnow().isoformat(),
-            ),
-        )
-        conn.commit()
-
-        log_audit("DIGESTION_SUCCESS", f"Processed scratchpad: {doc_title}")
-        st.success("Digestion complete!")
-        st.json(parsed)
-
-      except Exception as e:
-        log_audit("DIGESTION_ERROR", f"Failed scratchpad {doc_title}: {str(e)}")
-        st.error(f"Digestion Error: {str(e)}")
-
-with tab2:
-  st.subheader("Digested Knowledge Repository")
-  cursor.execute(
-      "SELECT id, filename, iso_category, confidence_score, timestamp FROM"
-      " documents ORDER BY timestamp DESC"
-  )
-  rows = cursor.fetchall()
-
-  if rows:
-    for row in rows:
-      with st.expander(f"📁 {row[1]} [{row[2]}] - Confidence: {row[3]}"):
-        st.write(f"**Processed Timestamp:** {row[4]}")
-        cursor.execute(
-            "SELECT summary, content FROM documents WHERE id = ?", (row[0],)
-        )
-        doc_data = cursor.fetchone()
-        st.markdown(f"**Summary:** {doc_data[0]}")
-        st.text_area(
-            "Original Content",
-            doc_data[1],
-            height=150,
-            key=f"content_{row[0]}",
-        )
-  else:
-    st.info("No documents digested yet.")
-
-with tab3:
-  st.subheader("ISO 9001 Compliance Audit Trail")
-  cursor.execute(
-      "SELECT action, details, timestamp FROM audit_trail ORDER BY timestamp"
-      " DESC LIMIT 50"
-  )
-  audit_rows = cursor.fetchall()
-  if audit_rows:
-    for audit in audit_rows:
-      st.text(f"[{audit[2]}] {audit[0]}: {audit[1]}")
-  else:
-    st.info("Audit log is currently empty.")
+      if not spaces:
+        st.info("No Google Chat spaces or direct conversations found.")
+      else:
+        total_messages_processed = 0
+        sync_results
