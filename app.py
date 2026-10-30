@@ -155,36 +155,29 @@ with tab1:
   if st.button(
       "🚀 Fetch Chats, Process & Push to Gemini Notebook", type="primary"
   ):
-    # Use st.status for real-time visual progress feedback
-    with st.status(
-        "Executing Chat Ingestion Pipeline...", expanded=True
-    ) as status:
-      st.write("Connecting to Google Workspace Chat API...")
+    with st.spinner("Connecting to Google Workspace Chat API..."):
       try:
         from googleapiclient.discovery import build
 
         chat_service = build("chat", "v1", credentials=creds)
-        st.write("Listing available chat spaces and direct messages...")
         spaces_result = chat_service.spaces().list().execute()
         spaces = spaces_result.get("spaces", [])
 
         if not spaces:
           st.warning("No Google Chat spaces or direct conversations found.")
-          status.update(
-              label="Ingestion complete: No spaces found.",
-              state="complete",
-              expanded=False,
-          )
         else:
           total_messages_processed = 0
           sync_results = []
 
-          for space in spaces:
+          progress_bar = st.progress(0)
+          total_spaces = len(spaces)
+
+          for idx, space in enumerate(spaces):
             space_name = space.get("name")
             display_name = space.get(
                 "displayName", space.get("type", "Direct Message")
             )
-            st.write(f"📂 Processing space: `{display_name}`")
+            st.info(f"📂 Processing space: {display_name}")
 
             try:
               messages_result = (
@@ -219,36 +212,32 @@ with tab1:
                     "status": "Successfully formatted & synced",
                     "message_count": len(chat_transcript),
                 })
-                st.write(
-                    f"  ↳ Synced {len(chat_transcript)} messages from"
-                    f" `{display_name}`."
+                st.success(
+                    f"Synced {len(chat_transcript)} messages from"
+                    f" '{display_name}'."
                 )
 
             except Exception as space_err:
               sync_results.append(
                   {"space": display_name, "status": f"Error: {str(space_err)}"}
               )
-              st.error(f"Error in space `{display_name}`: {str(space_err)}")
+              st.error(f"Error in space '{display_name}': {str(space_err)}")
+
+            progress_bar.progress((idx + 1) / total_spaces)
 
           log_audit(
               "NOTEBOOK_CHAT_SYNC",
               f"Synced {total_messages_processed} chat messages to notebook"
               f" {target_notebook_id}.",
           )
-          status.update(
-              label=(
-                  f"Successfully processed {total_messages_processed} messages"
-                  " across all spaces!"
-              ),
-              state="complete",
-              expanded=False,
+          st.success(
+              f"Successfully processed {total_messages_processed} messages"
+              " across all spaces!"
           )
-          st.success("Chat processing and sync complete!")
           st.json(sync_results)
 
       except Exception as e:
         log_audit("NOTEBOOK_CHAT_SYNC_ERROR", str(e))
-        status.update(label="Pipeline Failed", state="error", expanded=True)
         st.error(f"Sync Pipeline Error: {str(e)}")
 
 with tab2:
