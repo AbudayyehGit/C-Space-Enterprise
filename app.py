@@ -29,12 +29,13 @@ st.caption(
 def init_vertex_client():
   try:
     if "gcp_service_account" in st.secrets:
-      creds = service_account.Credentials.from_service_account_info(
-          st.secrets["gcp_service_account"]
-      )
+      # Cast Streamlit Secrets AttrDict to a standard dict to prevent PEM parsing errors
+      sa_dict = dict(st.secrets["gcp_service_account"])
+      creds = service_account.Credentials.from_service_account_info(sa_dict)
+
       client = genai.Client(
           vertexai=True,
-          project=st.secrets["gcp_service_account"]["project_id"],
+          project=sa_dict["project_id"],
           location="us-central1",
           credentials=creds,
       )
@@ -206,4 +207,13 @@ with tab2:
 
 with tab3:
   st.subheader("ISO 9001 Compliance Audit Trail")
-  cursor
+  cursor.execute(
+      "SELECT action, details, timestamp FROM audit_trail ORDER BY timestamp"
+      " DESC LIMIT 50"
+  )
+  audit_rows = cursor.fetchall()
+  if audit_rows:
+    for audit in audit_rows:
+      st.text(f"[{audit[2]}] {audit[0]}: {audit[1]}️")
+  else:
+    st.info("Audit log is currently empty.")
