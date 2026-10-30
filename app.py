@@ -1,8 +1,6 @@
-import base64
 from datetime import datetime
 import io
 import json
-import re
 import sqlite3
 from google import genai
 from google.oauth2 import service_account
@@ -23,79 +21,30 @@ st.caption(
 )
 
 # ==========================================
-# 2. UNIVERSAL BULLETPROOF VERTEX AI INIT
+# 2. RAW JSON VERTEX AI INITIALIZATION
 # ==========================================
 
 
 def init_vertex_client():
   try:
-    sa_dict = None
-
-    # Method 1: Check for Base64 Secret
-    if "GCP_SA_B64" in st.secrets:
-      b64_str = st.secrets["GCP_SA_B64"].strip()
-      missing_padding = len(b64_str) % 4
-      if missing_padding:
-        b64_str += "=" * (4 - missing_padding)
-      sa_dict = json.loads(base64.b64decode(b64_str).decode("utf-8"))
-
-    # Method 2: Check for Raw JSON Secret
-    elif "GCP_SA_JSON" in st.secrets:
-      sa_dict = json.loads(st.secrets["GCP_SA_JSON"])
-
-    # Method 3: Check for Individual TOML Fields
-    elif "gcp_private_key" in st.secrets:
-      sa_dict = {
-          "type": "service_account",
-          "project_id": st.secrets.get(
-              "gcp_project_id", "gen-lang-client-0874490944"
-          ),
-          "private_key_id": st.secrets.get("gcp_private_key_id", "dummy_id"),
-          "private_key": st.secrets["gcp_private_key"],
-          "client_email": st.secrets.get(
-              "gcp_client_email",
-              "c-space-enterprise@gen-lang-client-0874490944.iam.gserviceaccount.com",
-          ),
-          "token_uri": "https://oauth2.googleapis.com/token",
-      }
-
-    if not sa_dict:
-      return (
-          None,
-          "Error: No valid GCP credentials found in Streamlit secrets.",
+    if "GCP_SA_JSON" in st.secrets:
+      sa_json_raw = st.secrets["GCP_SA_JSON"]
+      sa_dict = (
+          json.loads(sa_json_raw)
+          if isinstance(sa_json_raw, str)
+          else sa_json_raw
       )
 
-    # Aggressive PEM Sanitization to fix offset errors & symbol 61 (=) issues
-    if "private_key" in sa_dict:
-      pk = sa_dict["private_key"]
-      # Normalize all newline variants
-      pk = (
-          pk.replace("\\r\\n", "\n")
-          .replace("\\n", "\n")
-          .replace("\\\\n", "\n")
-          .replace("\r\n", "\n")
+      creds = service_account.Credentials.from_service_account_info(sa_dict)
+      client = genai.Client(
+          vertexai=True,
+          project=sa_dict["project_id"],
+          location="us-central1",
+          credentials=creds,
       )
-
-      # Strip accidental outer quotes if present in TOML
-      pk = pk.strip("'").strip('"').strip()
-
-      # Ensure strict PEM headers
-      if not "-----BEGIN PRIVATE KEY-----" in pk:
-        pk = "-----BEGIN PRIVATE KEY-----\n" + pk
-      if not "-----END PRIVATE KEY-----" in pk:
-        pk = pk + "\n-----END PRIVATE KEY-----"
-
-      sa_dict["private_key"] = pk
-
-    creds = service_account.Credentials.from_service_account_info(sa_dict)
-    client = genai.Client(
-        vertexai=True,
-        project=sa_dict["project_id"],
-        location="us-central1",
-        credentials=creds,
-    )
-    return client, "Connected successfully via universal credentials parser"
-
+      return client, "Connected via Raw JSON Secrets"
+    else:
+      return None, "Error: 'GCP_SA_JSON' not found in Streamlit secrets."
   except Exception as e:
     return None, f"Authentication Error: {str(e)}"
 
