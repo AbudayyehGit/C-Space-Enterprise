@@ -1,3 +1,4 @@
+import base64
 from datetime import datetime
 import io
 import json
@@ -21,28 +22,15 @@ st.caption(
 )
 
 # ==========================================
-# 2. UNCACHED, BULLETPROOF VERTEX AI INIT
+# 2. BASE64-DECODED VERTEX AI INITIALIZATION
 # ==========================================
-# Removed @st.cache_resource to prevent old broken auth logic from sticking around
 
 
 def init_vertex_client():
   try:
-    if "GCP_SA_JSON" in st.secrets:
-      sa_json_str = st.secrets["GCP_SA_JSON"]
-      sa_dict = json.loads(sa_json_str)
-
-      # Aggressively strip literal backslashes and normalize newlines
-      if "private_key" in sa_dict:
-        pk = sa_dict["private_key"]
-        # Handle all possible TOML/JSON escape variations
-        pk = (
-            pk.replace("\\r\\n", "\n")
-            .replace("\\n", "\n")
-            .replace(r"\n", "\n")
-            .replace("\\\\n", "\n")
-        )
-        sa_dict["private_key"] = pk
+    if "GCP_SA_B64" in st.secrets:
+      sa_json_bytes = base64.b64decode(st.secrets["GCP_SA_B64"])
+      sa_dict = json.loads(sa_json_bytes.decode("utf-8"))
 
       creds = service_account.Credentials.from_service_account_info(sa_dict)
       client = genai.Client(
@@ -51,9 +39,9 @@ def init_vertex_client():
           location="us-central1",
           credentials=creds,
       )
-      return client, "Connected automatically via GCP Service Account Secrets"
+      return client, "Connected via Base64 GCP Secrets (Zero TOML Errors)"
     else:
-      return None, "Error: 'GCP_SA_JSON' not found in Streamlit secrets."
+      return None, "Error: 'GCP_SA_B64' not found in Streamlit secrets."
   except Exception as e:
     return None, f"Authentication Error: {str(e)}"
 
