@@ -236,4 +236,11 @@ with tab3:
   st.subheader("ISO 9001 Compliance Audit Trail")
   cursor.execute(
       "SELECT action, details, timestamp FROM audit_trail ORDER BY timestamp"
-      " DESC LIMIT 50
+      " DESC LIMIT 50"
+  )
+  audit_rows = cursor.fetchall()
+  if audit_rows:
+    for audit in audit_rows:
+      st.text(f"[{audit[2]}] {audit[0]}: {audit[1]}️")
+  else:
+    st.info("Audit log is currently empty.")
