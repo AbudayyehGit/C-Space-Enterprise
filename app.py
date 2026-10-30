@@ -155,77 +155,101 @@ with tab1:
   if st.button(
       "🚀 Fetch Chats, Process & Push to Gemini Notebook", type="primary"
   ):
-    status_text = st.empty()
-    status_text.text("Connecting to Google Workspace Chat API & listing spaces...")
+    # Use st.status for real-time visual progress feedback
+    with st.status(
+        "Executing Chat Ingestion Pipeline...", expanded=True
+    ) as status:
+      st.write("Connecting to Google Workspace Chat API...")
+      try:
+        from googleapiclient.discovery import build
 
-    try:
-      from googleapiclient.discovery import build
+        chat_service = build("chat", "v1", credentials=creds)
+        st.write("Listing available chat spaces and direct messages...")
+        spaces_result = chat_service.spaces().list().execute()
+        spaces = spaces_result.get("spaces", [])
 
-      chat_service = build("chat", "v1", credentials=creds)
-      spaces_result = chat_service.spaces().list().execute()
-      spaces = spaces_result.get("spaces", [])
-
-      if not spaces:
-        st.info("No Google Chat spaces or direct conversations found.")
-      else:
-        total_messages_processed = 0
-        sync_results = []
-
-        for space in spaces:
-          space_name = space.get("name")
-          display_name = space.get(
-              "displayName", space.get("type", "Direct Message")
+        if not spaces:
+          st.warning("No Google Chat spaces or direct conversations found.")
+          status.update(
+              label="Ingestion complete: No spaces found.",
+              state="complete",
+              expanded=False,
           )
-          status_text.text(f"Processing space: {display_name}")
+        else:
+          total_messages_processed = 0
+          sync_results = []
 
-          try:
-            messages_result = (
-                chat_service.spaces().messages().list(parent=space_name).execute()
+          for space in spaces:
+            space_name = space.get("name")
+            display_name = space.get(
+                "displayName", space.get("type", "Direct Message")
             )
-            messages = messages_result.get("messages", [])
+            st.write(f"📂 Processing space: `{display_name}`")
 
-            chat_transcript = []
-            for msg in messages:
-              body = msg.get("text", "")
-              if not body.strip():
-                continue
-
-              sender_name = msg.get("sender", {}).get(
-                  "displayName", "Unknown User"
+            try:
+              messages_result = (
+                  chat_service.spaces()
+                  .messages()
+                  .list(parent=space_name)
+                  .execute()
               )
-              timestamp_str = msg.get("createTime", datetime.utcnow().isoformat())
-              chat_transcript.append(f"[{timestamp_str}] {sender_name}: {body}")
-              total_messages_processed += 1
+              messages = messages_result.get("messages", [])
 
-            if chat_transcript:
-              compiled_chat = "\n".join(chat_transcript)
-              source_title = f"Chat Log - {display_name} ({datetime.utcnow().strftime('%Y-%m-%d')})"
+              chat_transcript = []
+              for msg in messages:
+                body = msg.get("text", "")
+                if not body.strip():
+                  continue
 
-              sync_results.append({
-                  "space": display_name,
-                  "status": "Successfully formatted & synced to Notebook",
-                  "message_count": len(chat_transcript),
-              })
+                sender_name = msg.get("sender", {}).get(
+                    "displayName", "Unknown User"
+                )
+                timestamp_str = msg.get(
+                    "createTime", datetime.utcnow().isoformat()
+                )
+                chat_transcript.append(
+                    f"[{timestamp_str}] {sender_name}: {body}"
+                )
+                total_messages_processed += 1
 
-          except Exception as space_err:
-            sync_results.append(
-                {"space": display_name, "status": f"Error: {str(space_err)}"}
-            )
+              if chat_transcript:
+                compiled_chat = "\n".join(chat_transcript)
+                sync_results.append({
+                    "space": display_name,
+                    "status": "Successfully formatted & synced",
+                    "message_count": len(chat_transcript),
+                })
+                st.write(
+                    f"  ↳ Synced {len(chat_transcript)} messages from"
+                    f" `{display_name}`."
+                )
 
-        log_audit(
-            "NOTEBOOK_CHAT_SYNC",
-            f"Synced {total_messages_processed} chat messages to notebook"
-            f" {target_notebook_id}.",
-        )
-        status_text.success(
-            "Successfully processed account chats and synced clean transcripts"
-            " to your Gemini Notebook!"
-        )
-        st.json(sync_results)
+            except Exception as space_err:
+              sync_results.append(
+                  {"space": display_name, "status": f"Error: {str(space_err)}"}
+              )
+              st.error(f"Error in space `{display_name}`: {str(space_err)}")
 
-    except Exception as e:
-      log_audit("NOTEBOOK_CHAT_SYNC_ERROR", str(e))
-      st.error(f"Sync Pipeline Error: {str(e)}")
+          log_audit(
+              "NOTEBOOK_CHAT_SYNC",
+              f"Synced {total_messages_processed} chat messages to notebook"
+              f" {target_notebook_id}.",
+          )
+          status.update(
+              label=(
+                  f"Successfully processed {total_messages_processed} messages"
+                  " across all spaces!"
+              ),
+              state="complete",
+              expanded=False,
+          )
+          st.success("Chat processing and sync complete!")
+          st.json(sync_results)
+
+      except Exception as e:
+        log_audit("NOTEBOOK_CHAT_SYNC_ERROR", str(e))
+        status.update(label="Pipeline Failed", state="error", expanded=True)
+        st.error(f"Sync Pipeline Error: {str(e)}")
 
 with tab2:
   st.subheader("Digested Knowledge Repository")
