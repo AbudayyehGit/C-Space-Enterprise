@@ -21,19 +21,28 @@ st.caption(
 )
 
 # ==========================================
-# 2. RAW JSON VERTEX AI INITIALIZATION
+# 2. DIRECT LITERAL TOML VERTEX AI INIT
 # ==========================================
 
 
 def init_vertex_client():
   try:
-    if "GCP_SA_JSON" in st.secrets:
-      sa_json_raw = st.secrets["GCP_SA_JSON"]
-      sa_dict = (
-          json.loads(sa_json_raw)
-          if isinstance(sa_json_raw, str)
-          else sa_json_raw
-      )
+    if "gcp_private_key" in st.secrets:
+      sa_dict = {
+          "type": "service_account",
+          "project_id": st.secrets.get(
+              "gcp_project_id", "gen-lang-client-0874490944"
+          ),
+          "private_key_id": st.secrets.get(
+              "gcp_private_key_id", "e7bd6b478b59aac027dd0cfc49f577da39721fa6"
+          ),
+          "private_key": st.secrets["gcp_private_key"].replace("\\n", "\n"),
+          "client_email": st.secrets.get(
+              "gcp_client_email",
+              "c-space-enterprise@gen-lang-client-0874490944.iam.gserviceaccount.com",
+          ),
+          "token_uri": "https://oauth2.googleapis.com/token",
+      }
 
       creds = service_account.Credentials.from_service_account_info(sa_dict)
       client = genai.Client(
@@ -42,9 +51,9 @@ def init_vertex_client():
           location="us-central1",
           credentials=creds,
       )
-      return client, "Connected via Raw JSON Secrets"
+      return client, "Connected via Direct Literal Secrets"
     else:
-      return None, "Error: 'GCP_SA_JSON' not found in Streamlit secrets."
+      return None, "Error: 'gcp_private_key' not found in Streamlit secrets."
   except Exception as e:
     return None, f"Authentication Error: {str(e)}"
 
