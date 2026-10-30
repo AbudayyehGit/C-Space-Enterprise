@@ -1,4 +1,4 @@
-import base64
+base64
 from datetime import datetime
 import io
 import json
@@ -23,7 +23,7 @@ st.caption(
 )
 
 # ==========================================
-# 2. BULLETPROOF SANITIZED VERTEX AI INIT
+# 2. BULLETPROOF INDESTRUCTIBLE VERTEX AI INIT
 # ==========================================
 
 
@@ -40,26 +40,40 @@ def init_vertex_client():
       raw_bytes = base64.b64decode(b64_str)
       raw_text = raw_bytes.decode("utf-8", errors="ignore")
 
-      # Sanitize any bad JSON escape sequences in the raw string
+      # Try standard JSON load first; if escape errors occur, use robust regex extraction
       try:
         sa_dict = json.loads(raw_text)
       except Exception:
-        # Fallback regex sanitizer for malformed JSON escapes in private keys
-        cleaned_text = (
-            raw_text.replace("\r\n", "\\n")
-            .replace("\n", "\\n")
-            .replace("\\\\n", "\\n")
-        )
-        sa_dict = json.loads(cleaned_text)
-
-      # Ensure the private key has true newlines for the crypto library
-      if "private_key" in sa_dict:
-        sa_dict["private_key"] = (
-            sa_dict["private_key"]
+        sa_dict = {
+            "type": "service_account",
+            "project_id": re.search(
+                r'"project_id"\s*:\s*"([^"]+)"', raw_text
+            ).group(1),
+            "private_key_id": re.search(
+                r'"private_key_id"\s*:\s*"([^"]+)"', raw_text
+            ).group(1),
+            "private_key": re.search(
+                r'"private_key"\s*:\s*"([\s\S]*?)"\s*,\s*"client_email"',
+                raw_text,
+            )
+            .group(1)
             .replace("\\n", "\n")
-            .replace("\\\\n", "\n")
             .replace("\r\n", "\n")
-        )
+            .replace("\\\\n", "\n"),
+            "client_email": re.search(
+                r'"client_email"\s*:\s*"([^"]+)"', raw_text
+            ).group(1),
+            "token_uri": "https://oauth2.googleapis.com/token",
+        }
+
+      # Ensure private key newlines are correct for the crypto library
+      if "private_key" in sa_dict:
+        pk = sa_dict["private_key"]
+        if "-----BEGIN PRIVATE KEY-----" in pk and not "\n" in pk:
+          # If it got squashed into a single line, re-insert standard newlines
+          pk = pk.replace("-----BEGIN PRIVATE KEY-----", "-----BEGIN PRIVATE KEY-----\n") \
+                 .replace("-----END PRIVATE KEY-----", "\n-----END PRIVATE KEY-----")
+        sa_dict["private_key"] = pk.replace("\\n", "\n").replace("\r\n", "\n")
 
       creds = service_account.Credentials.from_service_account_info(sa_dict)
       client = genai.Client(
@@ -68,7 +82,7 @@ def init_vertex_client():
           location="us-central1",
           credentials=creds,
       )
-      return client, "Connected via Sanitized Base64 Secrets"
+      return client, "Connected via Indestructible Base64 Secrets"
     else:
       return None, "Error: 'GCP_SA_B64' not found in Streamlit secrets."
   except Exception as e:
@@ -201,45 +215,4 @@ with tab1:
         except Exception as e:
           log_audit("DIGESTION_ERROR", f"Failed file {file.name}: {str(e)}")
           results.append(
-              {"filename": file.name, "status": f"Error: {str(e)}"}
-          )
-
-        progress_bar.progress((idx + 1) / len(uploaded_files))
-
-      st.success("Batch digestion complete!")
-      st.json(results)
-
-with tab2:
-  st.subheader("Digested Knowledge Repository")
-  cursor.execute(
-      "SELECT id, filename, iso_category, confidence_score, timestamp FROM"
-      " documents ORDER BY timestamp DESC"
-  )
-  rows = cursor.fetchall()
-
-  if rows:
-    for row in rows:
-      with st.expander(f"📁 {row[1]} [{row[2]}] - Confidence: {row[3]}"):
-        st.write(f"**Processed Timestamp:** {row[4]}")
-        cursor.execute(
-            "SELECT summary, content FROM documents WHERE id = ?", (row[0],)
-        )
-        doc_data = cursor.fetchone()
-        st.markdown(f"**Summary:** {doc_data[0]}")
-        with st.text_area("Original Content", doc_data[1], height=150, key=f"content_{row[0]}"):
-          pass
-  else:
-    st.info("No documents digested yet.")
-
-with tab3:
-  st.subheader("ISO 9001 Compliance Audit Trail")
-  cursor.execute(
-      "SELECT action, details, timestamp FROM audit_trail ORDER BY timestamp"
-      " DESC LIMIT 50"
-  )
-  audit_rows = cursor.fetchall()
-  if audit_rows:
-    for audit in audit_rows:
-      st.text(f"[{audit[2]}] {audit[0]}: {audit[1]}️")
-  else:
-    st.info("Audit log is currently empty.")
+              {"filename": file.name, "
