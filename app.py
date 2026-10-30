@@ -2,7 +2,6 @@ from datetime import datetime
 import io
 import json
 import sqlite3
-import tempfile
 from google import genai
 from google.oauth2 import service_account
 import streamlit as st
@@ -22,7 +21,7 @@ st.caption(
 )
 
 # ==========================================
-# 2. FULLY AUTOMATED VERTEX AI INITIALIZATION
+# 2. BULLETPROOF VERTEX AI INITIALIZATION
 # ==========================================
 
 
@@ -30,21 +29,17 @@ st.caption(
 def init_vertex_client():
   try:
     if "GCP_SA_JSON" in st.secrets:
-      # Parse the flat string secret automatically
       sa_json_str = st.secrets["GCP_SA_JSON"]
       sa_dict = json.loads(sa_json_str)
 
-      # Ensure private key escaped newlines are properly normalized
+      # Robustly normalize all variations of escaped newlines into actual newlines
       if "private_key" in sa_dict:
-        sa_dict["private_key"] = sa_dict["private_key"].replace("\\n", "\n")
+        pk = sa_dict["private_key"]
+        pk = pk.replace("\\\\n", "\n").replace("\\n", "\n")
+        sa_dict["private_key"] = pk
 
-      with tempfile.NamedTemporaryFile(
-          mode="w", delete=False, suffix=".json"
-      ) as tmp:
-        json.dump(sa_dict, tmp)
-        tmp_path = tmp.name
-
-      creds = service_account.Credentials.from_service_account_file(tmp_path)
+      # Load directly from info dict without temp file overhead
+      creds = service_account.Credentials.from_service_account_info(sa_dict)
       client = genai.Client(
           vertexai=True,
           project=sa_dict["project_id"],
@@ -224,3 +219,5 @@ with tab3:
   if audit_rows:
     for audit in audit_rows:
       st.text(f"[{audit[2]}] {audit[0]}: {audit[1]}️")
+  else:
+    st.info("Audit log is currently empty.")
