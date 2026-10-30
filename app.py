@@ -1,4 +1,4 @@
-base64
+import base64
 from datetime import datetime
 import io
 import json
@@ -41,7 +41,6 @@ def init_vertex_client():
       raw_text = raw_bytes.decode("utf-8", errors="ignore")
 
       # Sanitize any bad JSON escape sequences in the raw string
-      # This replaces problematic backslashes/newlines safely
       try:
         sa_dict = json.loads(raw_text)
       except Exception:
@@ -51,7 +50,6 @@ def init_vertex_client():
             .replace("\n", "\\n")
             .replace("\\\\n", "\\n")
         )
-        # Fix quote wrapping if needed, then parse
         sa_dict = json.loads(cleaned_text)
 
       # Ensure the private key has true newlines for the crypto library
