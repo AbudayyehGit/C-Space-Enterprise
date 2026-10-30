@@ -33,11 +33,15 @@ def init_vertex_client():
       sa_json_str = st.secrets["GCP_SA_JSON"]
       sa_dict = json.loads(sa_json_str)
 
-      # Write exact raw JSON string to a temp file, bypassing TOML table parsing bugs
+      # Ensure private key escaped newlines are properly normalized
+      if "private_key" in sa_dict:
+        sa_dict["private_key"] = sa_dict["private_key"].replace("\\n", "\n")
+
+      # Write normalized dict to temp file, bypassing TOML table parsing bugs
       with tempfile.NamedTemporaryFile(
           mode="w", delete=False, suffix=".json"
       ) as tmp:
-        tmp.write(sa_json_str)
+        json.dump(sa_dict, tmp)
         tmp_path = tmp.name
 
       creds = service_account.Credentials.from_service_account_file(tmp_path)
