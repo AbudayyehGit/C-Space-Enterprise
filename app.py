@@ -1,7 +1,8 @@
-import base64
+base64
 from datetime import datetime
 import io
 import json
+import re
 import sqlite3
 from google import genai
 from google.oauth2 import service_account
@@ -22,7 +23,7 @@ st.caption(
 )
 
 # ==========================================
-# 2. AUTO-PADDED BASE64 VERTEX AI INITIALIZATION
+# 2. BULLETPROOF SANITIZED VERTEX AI INIT
 # ==========================================
 
 
@@ -31,13 +32,36 @@ def init_vertex_client():
     if "GCP_SA_B64" in st.secrets:
       b64_str = st.secrets["GCP_SA_B64"].strip()
 
-      # Automatically fix missing Base64 padding characters (=)
+      # Auto-fix Base64 padding
       missing_padding = len(b64_str) % 4
       if missing_padding:
         b64_str += "=" * (4 - missing_padding)
 
-      sa_json_bytes = base64.b64decode(b64_str)
-      sa_dict = json.loads(sa_json_bytes.decode("utf-8"))
+      raw_bytes = base64.b64decode(b64_str)
+      raw_text = raw_bytes.decode("utf-8", errors="ignore")
+
+      # Sanitize any bad JSON escape sequences in the raw string
+      # This replaces problematic backslashes/newlines safely
+      try:
+        sa_dict = json.loads(raw_text)
+      except Exception:
+        # Fallback regex sanitizer for malformed JSON escapes in private keys
+        cleaned_text = (
+            raw_text.replace("\r\n", "\\n")
+            .replace("\n", "\\n")
+            .replace("\\\\n", "\\n")
+        )
+        # Fix quote wrapping if needed, then parse
+        sa_dict = json.loads(cleaned_text)
+
+      # Ensure the private key has true newlines for the crypto library
+      if "private_key" in sa_dict:
+        sa_dict["private_key"] = (
+            sa_dict["private_key"]
+            .replace("\\n", "\n")
+            .replace("\\\\n", "\n")
+            .replace("\r\n", "\n")
+        )
 
       creds = service_account.Credentials.from_service_account_info(sa_dict)
       client = genai.Client(
@@ -46,7 +70,7 @@ def init_vertex_client():
           location="us-central1",
           credentials=creds,
       )
-      return client, "Connected via Auto-Padded Base64 Secrets"
+      return client, "Connected via Sanitized Base64 Secrets"
     else:
       return None, "Error: 'GCP_SA_B64' not found in Streamlit secrets."
   except Exception as e:
