@@ -5,8 +5,6 @@ import json
 import sqlite3
 from google import genai
 from google.oauth2 import service_account
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.backends import default_backend
 import streamlit as st
 
 # ==========================================
@@ -24,61 +22,17 @@ st.caption(
 )
 
 # ==========================================
-# 2. BULLETPROOF ASN.1 / DER / PEM VERTEX INIT
+# 2. NATIVE GOOGLE CREDENTIALS LOADER
 # ==========================================
 
 
 def init_vertex_client():
   try:
     if "gcp_private_key" in st.secrets:
-      pk_raw = st.secrets["gcp_private_key"].strip().strip("'").strip('"')
-
-      # Normalize escaped newlines
-      if "\\n" in pk_raw:
-        pk_raw = pk_raw.replace("\\n", "\n")
-
-      # If the key is provided as raw Base64/DER without PEM headers, convert it
-      if "-----BEGIN" not in pk_raw:
-        try:
-          # Try decoding as base64 DER and re-encoding to valid PEM
-          der_bytes = base64.b64decode(pk_raw.replace("\n", ""))
-          private_key_obj = serialization.load_der_private_key(
-              der_bytes, password=None, backend=default_backend()
-          )
-          pem_bytes = private_key_obj.private_bytes(
-              encoding=serialization.Encoding.PEM,
-              format=serialization.PrivateFormat.PKCS8,
-              encryption_algorithm=serialization.NoEncryption(),
-          )
-          pk_normalized = pem_bytes.decode("utf-8")
-        except Exception:
-          # Fallback wrapper if base64 conversion fails
-          clean_body = "".join(pk_raw.split())
-          formatted_lines = [
-              clean_body[i : i + 64] for i in range(0, len(clean_body), 64)
-          ]
-          pk_normalized = (
-              "-----BEGIN PRIVATE KEY-----\n"
-              + "\n".join(formatted_lines)
-              + "\n-----END PRIVATE KEY-----"
-          )
-      else:
-        # Standardize existing PEM line breaks
-        body = (
-            pk_raw.replace("-----BEGIN PRIVATE KEY-----", "")
-            .replace("-----END PRIVATE KEY-----", "")
-            .replace("-----BEGIN RSA PRIVATE KEY-----", "")
-            .replace("-----END RSA PRIVATE KEY-----", "")
-        )
-        clean_body = "".join(body.split())
-        formatted_lines = [
-            clean_body[i : i + 64] for i in range(0, len(clean_body), 64)
-        ]
-        pk_normalized = (
-            "-----BEGIN PRIVATE KEY-----\n"
-            + "\n".join(formatted_lines)
-            + "\n-----END PRIVATE KEY-----"
-        )
+      # Use the exact raw string from secrets with standard newline unescaping
+      private_key = st.secrets["gcp_private_key"]
+      if "\\n" in private_key:
+        private_key = private_key.replace("\\n", "\n")
 
       sa_dict = {
           "type": "service_account",
@@ -88,7 +42,7 @@ def init_vertex_client():
           "private_key_id": st.secrets.get(
               "gcp_private_key_id", "e7bd6b478b59aac027dd0cfc49f577da39721fa6"
           ),
-          "private_key": pk_normalized,
+          "private_key": private_key,
           "client_email": st.secrets.get(
               "gcp_client_email",
               "c-space-enterprise@gen-lang-client-0874490944.iam.gserviceaccount.com",
@@ -103,7 +57,7 @@ def init_vertex_client():
           location="us-central1",
           credentials=creds,
       )
-      return client, "Connected via Cryptography-Validated PEM/DER Secrets"
+      return client, "Connected via Native Service Account Info"
     else:
       return None, "Error: 'gcp_private_key' not found in Streamlit secrets."
   except Exception as e:
@@ -270,11 +224,3 @@ with tab3:
   st.subheader("ISO 9001 Compliance Audit Trail")
   cursor.execute(
       "SELECT action, details, timestamp FROM audit_trail ORDER BY timestamp"
-      " DESC LIMIT 50"
-  )
-  audit_rows = cursor.fetchall()
-  if audit_rows:
-    for audit in audit_rows:
-      st.text(f"[{audit[2]}] {audit[0]}: {audit[1]}️")
-  else:
-    st.info("Audit log is currently empty.")
