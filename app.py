@@ -51,7 +51,6 @@ def init_vertex_client(uploaded_file):
           "Awaiting GCP Service Account JSON key upload in the sidebar...",
       )
 
-    # Write temporary file for native SDK support
     temp_cred_path = "/tmp/gcp_sa_temp.json"
     with open(temp_cred_path, "w") as f:
       json.dump(sa_dict, f)
@@ -130,81 +129,70 @@ def log_audit(action, details):
 # 4. MAIN APPLICATION INTERFACE
 # ==========================================
 tab1, tab2, tab3 = st.tabs(
-    ["📥 Batch Digestion", "📊 Knowledge Base", "🛡️ ISO 9001 Audit Trail"]
+    ["✍️ Direct Scratchpad", "📊 Knowledge Base", "🛡️ ISO 9001 Audit Trail"]
 )
 
 with tab1:
-  st.subheader("Batch Knowledge Digestion")
-  uploaded_files = st.file_uploader(
-      "Upload source documents (TXT, MD, JSON)",
-      type=["txt", "md", "json"],
-      accept_multiple_files=True,
+  st.subheader("Direct In-Browser Text Digestion")
+  st.caption(
+      "Paste your source notes, requirements, or documentation directly below"
+      " for instant zero-file ingestion."
   )
 
-  if st.button("Execute Batch Digestion", type="primary"):
-    if not uploaded_files:
-      st.warning("Please upload at least one document.")
-    else:
-      progress_bar = st.progress(0)
-      results = []
+  doc_title = st.text_input(
+      "Document Title / Identifier", value="ISO-Draft-Note-01"
+  )
+  scratchpad_content = st.text_area(
+      "Paste Content Here", height=200, placeholder="Enter text..."
+  )
 
-      for idx, file in enumerate(uploaded_files):
-        content = file.read().decode("utf-8")
-        prompt = (
-            "Analyze the following document for ISO 9001 compliance, provide a"
-            " concise summary, categorize it, and assign a confidence score"
-            " between 0.0 and 1.0. Return strictly in JSON format with keys:"
-            " summary, iso_category, confidence_score.\n\nDocument Content:\n"
-            f"{content}"
+  if st.button("Analyze & Digest Text", type="primary"):
+    if not scratchpad_content.strip():
+      st.warning("Please enter some text to analyze.")
+    else:
+      prompt = (
+          "Analyze the following document for ISO 9001 compliance, provide a"
+          " concise summary, categorize it, and assign a confidence score"
+          " between 0.0 and 1.0. Return strictly in JSON format with keys:"
+          " summary, iso_category, confidence_score.\n\nDocument Content:\n"
+          f"{scratchpad_content}"
+      )
+
+      try:
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
         )
 
-        try:
-          response = client.models.generate_content(
-              model="gemini-2.5-flash",
-              contents=prompt,
-          )
+        raw_text = response.text.strip()
+        if raw_text.startswith("```json"):
+          raw_text = raw_text[7:-3].strip()
 
-          raw_text = response.text.strip()
-          if raw_text.startswith("```json"):
-            raw_text = raw_text[7:-3].strip()
+        parsed = json.loads(raw_text)
 
-          parsed = json.loads(raw_text)
+        cursor.execute(
+            """
+                    INSERT INTO documents (filename, content, summary, confidence_score, iso_category, timestamp)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """,
+            (
+                doc_title,
+                scratchpad_content,
+                parsed.get("summary", ""),
+                float(parsed.get("confidence_score", 0.0)),
+                parsed.get("iso_category", "General"),
+                datetime.utcnow().isoformat(),
+            ),
+        )
+        conn.commit()
 
-          cursor.execute(
-              """
-                        INSERT INTO documents (filename, content, summary, confidence_score, iso_category, timestamp)
-                        VALUES (?, ?, ?, ?, ?, ?)
-                    """,
-              (
-                  file.name,
-                  content,
-                  parsed.get("summary", ""),
-                  float(parsed.get("confidence_score", 0.0)),
-                  parsed.get("iso_category", "General"),
-                  datetime.utcnow().isoformat(),
-              ),
-          )
-          conn.commit()
+        log_audit("DIGESTION_SUCCESS", f"Processed scratchpad: {doc_title}")
+        st.success("Digestion complete!")
+        st.json(parsed)
 
-          log_audit("DIGESTION_SUCCESS", f"Processed file: {file.name}")
-          results.append(
-              {
-                  "filename": file.name,
-                  "status": "Success",
-                  "category": parsed.get("iso_category"),
-              }
-          )
-
-        except Exception as e:
-          log_audit("DIGESTION_ERROR", f"Failed file {file.name}: {str(e)}")
-          results.append(
-              {"filename": file.name, "status": f"Error: {str(e)}"}
-          )
-
-        progress_bar.progress((idx + 1) / len(uploaded_files))
-
-      st.success("Batch digestion complete!")
-      st.json(results)
+      except Exception as e:
+        log_audit("DIGESTION_ERROR", f"Failed scratchpad {doc_title}: {str(e)}")
+        st.error(f"Digestion Error: {str(e)}")
 
 with tab2:
   st.subheader("Digested Knowledge Repository")
@@ -241,6 +229,6 @@ with tab3:
   audit_rows = cursor.fetchall()
   if audit_rows:
     for audit in audit_rows:
-      st.text(f"[{audit[2]}] {audit[0]}: {audit[1]}️")
+      st.text(f"[{audit[2]}] {audit[0]}: {audit[1]}")
   else:
     st.info("Audit log is currently empty.")
