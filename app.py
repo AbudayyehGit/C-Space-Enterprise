@@ -22,16 +22,42 @@ st.caption(
 )
 
 # ==========================================
-# 2. NATIVE GOOGLE CREDENTIALS LOADER
+# 2. BULLETPROOF PEM REBUILDER INITIALIZATION
 # ==========================================
 
 
 def init_vertex_client():
   try:
     if "gcp_private_key" in st.secrets:
-      private_key = st.secrets["gcp_private_key"]
-      if "\\n" in private_key:
-        private_key = private_key.replace("\\n", "\n")
+      pk = st.secrets["gcp_private_key"]
+
+      # 1. Strip any accidental leading/trailing quotes or whitespace from TOML
+      pk = pk.strip().strip("'").strip('"')
+
+      # 2. Unescape all possible newline variations (single, double, Windows)
+      pk = (
+          pk.replace("\\\\n", "\n")
+          .replace("\\n", "\n")
+          .replace("\\r\\n", "\n")
+          .replace("\r\n", "\n")
+      )
+
+      # 3. Extract pure base64 body and rebuild valid PEM framing from scratch
+      body = (
+          pk.replace("-----BEGIN PRIVATE KEY-----", "")
+          .replace("-----END PRIVATE KEY-----", "")
+          .replace("-----BEGIN RSA PRIVATE KEY-----", "")
+          .replace("-----END RSA PRIVATE KEY-----", "")
+      )
+      clean_body = "".join(body.split())
+      formatted_lines = [
+          clean_body[i : i + 64] for i in range(0, len(clean_body), 64)
+      ]
+      normalized_private_key = (
+          "-----BEGIN PRIVATE KEY-----\n"
+          + "\n".join(formatted_lines)
+          + "\n-----END PRIVATE KEY-----"
+      )
 
       sa_dict = {
           "type": "service_account",
@@ -41,7 +67,7 @@ def init_vertex_client():
           "private_key_id": st.secrets.get(
               "gcp_private_key_id", "e7bd6b478b59aac027dd0cfc49f577da39721fa6"
           ),
-          "private_key": private_key,
+          "private_key": normalized_private_key,
           "client_email": st.secrets.get(
               "gcp_client_email",
               "c-space-enterprise@gen-lang-client-0874490944.iam.gserviceaccount.com",
@@ -56,7 +82,7 @@ def init_vertex_client():
           location="us-central1",
           credentials=creds,
       )
-      return client, "Connected via Native Service Account Info"
+      return client, "Connected via Rebuilt PEM Secrets"
     else:
       return None, "Error: 'gcp_private_key' not found in Streamlit secrets."
   except Exception as e:
