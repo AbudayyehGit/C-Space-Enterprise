@@ -1,4 +1,4 @@
-base64
+import base64
 from datetime import datetime
 import io
 import json
@@ -70,9 +70,13 @@ def init_vertex_client():
       if "private_key" in sa_dict:
         pk = sa_dict["private_key"]
         if "-----BEGIN PRIVATE KEY-----" in pk and not "\n" in pk:
-          # If it got squashed into a single line, re-insert standard newlines
-          pk = pk.replace("-----BEGIN PRIVATE KEY-----", "-----BEGIN PRIVATE KEY-----\n") \
-                 .replace("-----END PRIVATE KEY-----", "\n-----END PRIVATE KEY-----")
+          pk = (
+              pk.replace(
+                  "-----BEGIN PRIVATE KEY-----",
+                  "-----BEGIN PRIVATE KEY-----\n",
+              )
+              .replace("-----END PRIVATE KEY-----", "\n-----END PRIVATE KEY-----")
+          )
         sa_dict["private_key"] = pk.replace("\\n", "\n").replace("\r\n", "\n")
 
       creds = service_account.Credentials.from_service_account_info(sa_dict)
@@ -215,4 +219,45 @@ with tab1:
         except Exception as e:
           log_audit("DIGESTION_ERROR", f"Failed file {file.name}: {str(e)}")
           results.append(
-              {"filename": file.name, "
+              {"filename": file.name, "status": f"Error: {str(e)}"}
+          )
+
+        progress_bar.progress((idx + 1) / len(uploaded_files))
+
+      st.success("Batch digestion complete!")
+      st.json(results)
+
+with tab2:
+  st.subheader("Digested Knowledge Repository")
+  cursor.execute(
+      "SELECT id, filename, iso_category, confidence_score, timestamp FROM"
+      " documents ORDER BY timestamp DESC"
+  )
+  rows = cursor.fetchall()
+
+  if rows:
+    for row in rows:
+      with st.expander(f"📁 {row[1]} [{row[2]}] - Confidence: {row[3]}"):
+        st.write(f"**Processed Timestamp:** {row[4]}")
+        cursor.execute(
+            "SELECT summary, content FROM documents WHERE id = ?", (row[0],)
+        )
+        doc_data = cursor.fetchone()
+        st.markdown(f"**Summary:** {doc_data[0]}")
+        with st.text_area("Original Content", doc_data[1], height=150, key=f"content_{row[0]}"):
+          pass
+  else:
+    st.info("No documents digested yet.")
+
+with tab3:
+  st.subheader("ISO 9001 Compliance Audit Trail")
+  cursor.execute(
+      "SELECT action, details, timestamp FROM audit_trail ORDER BY timestamp"
+      " DESC LIMIT 50"
+  )
+  audit_rows = cursor.fetchall()
+  if audit_rows:
+    for audit in audit_rows:
+      st.text(f"[{audit[2]}] {audit[0]}: {audit[1]}️")
+  else:
+    st.info("Audit log is currently empty.")
