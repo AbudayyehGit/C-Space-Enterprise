@@ -21,13 +21,51 @@ st.caption(
 )
 
 # ==========================================
-# 2. DIRECT LITERAL TOML VERTEX AI INIT
+# 2. ROBUST ASN.1 / PEM NORMALIZING VERTEX INIT
 # ==========================================
 
 
 def init_vertex_client():
   try:
     if "gcp_private_key" in st.secrets:
+      pk = st.secrets["gcp_private_key"]
+
+      # Clean up any TOML artifacts, quotes, or trailing spaces
+      pk = pk.strip().strip("'").strip('"')
+
+      # If the key contains literal escaped newlines, convert them
+      if "\\n" in pk:
+        pk = pk.replace("\\n", "\n")
+
+      # If it's missing headers but looks like raw base64 PEM body, wrap it
+      if "-----BEGIN PRIVATE KEY-----" not in pk:
+        # Format into standard 64-character PEM lines
+        clean_body = "".join(pk.split())
+        formatted_lines = [
+            clean_body[i : i + 64] for i in range(0, len(clean_body), 64)
+        ]
+        pk = (
+            "-----BEGIN PRIVATE KEY-----\n"
+            + "\n".join(formatted_lines)
+            + "\n-----END PRIVATE KEY-----"
+        )
+      else:
+        # Ensure proper spacing around headers/footers
+        pk = (
+            pk.replace("-----BEGIN PRIVATE KEY-----", "")
+            .replace("-----END PRIVATE KEY-----", "")
+            .strip()
+        )
+        clean_body = "".join(pk.split())
+        formatted_lines = [
+            clean_body[i : i + 64] for i in range(0, len(clean_body), 64)
+        ]
+        pk = (
+            "-----BEGIN PRIVATE KEY-----\n"
+            + "\n".join(formatted_lines)
+            + "\n-----END PRIVATE KEY-----"
+        )
+
       sa_dict = {
           "type": "service_account",
           "project_id": st.secrets.get(
@@ -36,7 +74,7 @@ def init_vertex_client():
           "private_key_id": st.secrets.get(
               "gcp_private_key_id", "e7bd6b478b59aac027dd0cfc49f577da39721fa6"
           ),
-          "private_key": st.secrets["gcp_private_key"].replace("\\n", "\n"),
+          "private_key": pk,
           "client_email": st.secrets.get(
               "gcp_client_email",
               "c-space-enterprise@gen-lang-client-0874490944.iam.gserviceaccount.com",
@@ -51,7 +89,7 @@ def init_vertex_client():
           location="us-central1",
           credentials=creds,
       )
-      return client, "Connected via Direct Literal Secrets"
+      return client, "Connected via Normalized PEM Secrets"
     else:
       return None, "Error: 'gcp_private_key' not found in Streamlit secrets."
   except Exception as e:
@@ -183,46 +221,3 @@ with tab1:
 
         except Exception as e:
           log_audit("DIGESTION_ERROR", f"Failed file {file.name}: {str(e)}")
-          results.append(
-              {"filename": file.name, "status": f"Error: {str(e)}"}
-          )
-
-        progress_bar.progress((idx + 1) / len(uploaded_files))
-
-      st.success("Batch digestion complete!")
-      st.json(results)
-
-with tab2:
-  st.subheader("Digested Knowledge Repository")
-  cursor.execute(
-      "SELECT id, filename, iso_category, confidence_score, timestamp FROM"
-      " documents ORDER BY timestamp DESC"
-  )
-  rows = cursor.fetchall()
-
-  if rows:
-    for row in rows:
-      with st.expander(f"📁 {row[1]} [{row[2]}] - Confidence: {row[3]}"):
-        st.write(f"**Processed Timestamp:** {row[4]}")
-        cursor.execute(
-            "SELECT summary, content FROM documents WHERE id = ?", (row[0],)
-        )
-        doc_data = cursor.fetchone()
-        st.markdown(f"**Summary:** {doc_data[0]}")
-        with st.text_area("Original Content", doc_data[1], height=150, key=f"content_{row[0]}"):
-          pass
-  else:
-    st.info("No documents digested yet.")
-
-with tab3:
-  st.subheader("ISO 9001 Compliance Audit Trail")
-  cursor.execute(
-      "SELECT action, details, timestamp FROM audit_trail ORDER BY timestamp"
-      " DESC LIMIT 50"
-  )
-  audit_rows = cursor.fetchall()
-  if audit_rows:
-    for audit in audit_rows:
-      st.text(f"[{audit[2]}] {audit[0]}: {audit[1]}️")
-  else:
-    st.info("Audit log is currently empty.")
