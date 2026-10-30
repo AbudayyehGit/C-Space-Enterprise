@@ -22,14 +22,21 @@ st.caption(
 )
 
 # ==========================================
-# 2. BASE64-DECODED VERTEX AI INITIALIZATION
+# 2. AUTO-PADDED BASE64 VERTEX AI INITIALIZATION
 # ==========================================
 
 
 def init_vertex_client():
   try:
     if "GCP_SA_B64" in st.secrets:
-      sa_json_bytes = base64.b64decode(st.secrets["GCP_SA_B64"])
+      b64_str = st.secrets["GCP_SA_B64"].strip()
+
+      # Automatically fix missing Base64 padding characters (=)
+      missing_padding = len(b64_str) % 4
+      if missing_padding:
+        b64_str += "=" * (4 - missing_padding)
+
+      sa_json_bytes = base64.b64decode(b64_str)
       sa_dict = json.loads(sa_json_bytes.decode("utf-8"))
 
       creds = service_account.Credentials.from_service_account_info(sa_dict)
@@ -39,7 +46,7 @@ def init_vertex_client():
           location="us-central1",
           credentials=creds,
       )
-      return client, "Connected via Base64 GCP Secrets (Zero TOML Errors)"
+      return client, "Connected via Auto-Padded Base64 Secrets"
     else:
       return None, "Error: 'GCP_SA_B64' not found in Streamlit secrets."
   except Exception as e:
