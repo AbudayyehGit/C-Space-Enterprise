@@ -2,7 +2,6 @@ import base64
 from datetime import datetime
 import io
 import json
-import re
 import sqlite3
 from google import genai
 from google.oauth2 import service_account
@@ -23,7 +22,7 @@ st.caption(
 )
 
 # ==========================================
-# 2. BULLETPROOF INDESTRUCTIBLE VERTEX AI INIT
+# 2. BULLETPROOF VERTEX AI INITIALIZATION
 # ==========================================
 
 
@@ -38,38 +37,20 @@ def init_vertex_client():
         b64_str += "=" * (4 - missing_padding)
 
       raw_bytes = base64.b64decode(b64_str)
-      raw_text = raw_bytes.decode("utf-8", errors="ignore")
+      sa_dict = json.loads(raw_bytes.decode("utf-8"))
 
-      # Try standard JSON load first; if escape errors occur, use robust regex extraction
-      try:
-        sa_dict = json.loads(raw_text)
-      except Exception:
-        sa_dict = {
-            "type": "service_account",
-            "project_id": re.search(
-                r'"project_id"\s*:\s*"([^"]+)"', raw_text
-            ).group(1),
-            "private_key_id": re.search(
-                r'"private_key_id"\s*:\s*"([^"]+)"', raw_text
-            ).group(1),
-            "private_key": re.search(
-                r'"private_key"\s*:\s*"([\s\S]*?)"\s*,\s*"client_email"',
-                raw_text,
-            )
-            .group(1)
-            .replace("\\n", "\n")
-            .replace("\r\n", "\n")
-            .replace("\\\\n", "\n"),
-            "client_email": re.search(
-                r'"client_email"\s*:\s*"([^"]+)"', raw_text
-            ).group(1),
-            "token_uri": "https://oauth2.googleapis.com/token",
-        }
-
-      # Ensure private key newlines are correct for the crypto library
+      # Clean and normalize the private key newlines
       if "private_key" in sa_dict:
         pk = sa_dict["private_key"]
-        if "-----BEGIN PRIVATE KEY-----" in pk and not "\n" in pk:
+        # Normalize escaped newlines to actual newlines
+        pk = (
+            pk.replace("\\r\\n", "\n")
+            .replace("\\n", "\n")
+            .replace("\\\\n", "\n")
+            .replace("\r\n", "\n")
+        )
+        # Ensure proper PEM header/footer spacing if squashed
+        if "-----BEGIN PRIVATE KEY-----" in pk and "\n" not in pk[27:-25]:
           pk = (
               pk.replace(
                   "-----BEGIN PRIVATE KEY-----",
@@ -77,7 +58,7 @@ def init_vertex_client():
               )
               .replace("-----END PRIVATE KEY-----", "\n-----END PRIVATE KEY-----")
           )
-        sa_dict["private_key"] = pk.replace("\\n", "\n").replace("\r\n", "\n")
+        sa_dict["private_key"] = pk
 
       creds = service_account.Credentials.from_service_account_info(sa_dict)
       client = genai.Client(
@@ -86,7 +67,7 @@ def init_vertex_client():
           location="us-central1",
           credentials=creds,
       )
-      return client, "Connected via Indestructible Base64 Secrets"
+      return client, "Connected via Base64 GCP Secrets"
     else:
       return None, "Error: 'GCP_SA_B64' not found in Streamlit secrets."
   except Exception as e:
