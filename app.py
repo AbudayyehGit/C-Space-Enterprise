@@ -21,24 +21,29 @@ st.caption(
 )
 
 # ==========================================
-# 2. BULLETPROOF VERTEX AI INITIALIZATION
+# 2. UNCACHED, BULLETPROOF VERTEX AI INIT
 # ==========================================
+# Removed @st.cache_resource to prevent old broken auth logic from sticking around
 
 
-@st.cache_resource
 def init_vertex_client():
   try:
     if "GCP_SA_JSON" in st.secrets:
       sa_json_str = st.secrets["GCP_SA_JSON"]
       sa_dict = json.loads(sa_json_str)
 
-      # Robustly normalize all variations of escaped newlines into actual newlines
+      # Aggressively strip literal backslashes and normalize newlines
       if "private_key" in sa_dict:
         pk = sa_dict["private_key"]
-        pk = pk.replace("\\\\n", "\n").replace("\\n", "\n")
+        # Handle all possible TOML/JSON escape variations
+        pk = (
+            pk.replace("\\r\\n", "\n")
+            .replace("\\n", "\n")
+            .replace(r"\n", "\n")
+            .replace("\\\\n", "\n")
+        )
         sa_dict["private_key"] = pk
 
-      # Load directly from info dict without temp file overhead
       creds = service_account.Credentials.from_service_account_info(sa_dict)
       client = genai.Client(
           vertexai=True,
