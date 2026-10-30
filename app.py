@@ -1,8 +1,6 @@
-import base64
 from datetime import datetime
 import io
 import json
-import re
 import sqlite3
 from google import genai
 from google.oauth2 import service_account
@@ -23,66 +21,32 @@ st.caption(
 )
 
 # ==========================================
-# 2. BULLETPROOF RESILIENT VERTEX AI INIT
+# 2. BULLETPROOF PEM FRAMING INITIALIZATION
 # ==========================================
 
 
 def init_vertex_client():
   try:
-    if "GCP_SA_B64" in st.secrets:
-      b64_str = st.secrets["GCP_SA_B64"].strip()
+    if "gcp_project_id" in st.secrets and "gcp_private_key" in st.secrets:
+      raw_key = st.secrets["gcp_private_key"].strip()
 
-      # Auto-fix Base64 padding
-      missing_padding = len(b64_str) % 4
-      if missing_padding:
-        b64_str += "=" * (4 - missing_padding)
+      # Clean up any weird carriage returns from cloud formatting
+      raw_key = raw_key.replace("\r\n", "\n")
 
-      raw_bytes = base64.b64decode(b64_str)
-      raw_text = raw_bytes.decode("utf-8", errors="ignore")
+      # Ensure strict PEM formatting
+      if not raw_key.startswith("-----BEGIN PRIVATE KEY-----"):
+        raw_key = "-----BEGIN PRIVATE KEY-----\n" + raw_key.lstrip()
+      if not raw_key.endswith("-----END PRIVATE KEY-----"):
+        raw_key = raw_key.rstrip() + "\n-----END PRIVATE KEY-----"
 
-      # Try standard JSON load first; fallback to robust extraction if escape errors occur
-      try:
-        sa_dict = json.loads(raw_text)
-      except Exception:
-        def extract(pattern, text, default=""):
-          m = re.search(pattern, text)
-          return m.group(1) if m else default
-
-        project_id = extract(r'"project_id"\s*:\s*"([^"]+)"', raw_text)
-        private_key_id = extract(r'"private_key_id"\s*:\s*"([^"]+)"', raw_text)
-        client_email = extract(r'"client_email"\s*:\s*"([^"]+)"', raw_text)
-
-        # Extract private key safely between quotes
-        pk_match = re.search(r'"private_key"\s*:\s*"([\s\S]*?)(?<!\\)"', raw_text)
-        private_key = pk_match.group(1) if pk_match else ""
-
-        sa_dict = {
-            "type": "service_account",
-            "project_id": project_id,
-            "private_key_id": private_key_id,
-            "private_key": private_key,
-            "client_email": client_email,
-            "token_uri": "https://oauth2.googleapis.com/token",
-        }
-
-      # Normalize private key newlines for the cryptographic library
-      if "private_key" in sa_dict:
-        pk = sa_dict["private_key"]
-        pk = (
-            pk.replace("\\r\\n", "\n")
-            .replace("\\n", "\n")
-            .replace("\\\\n", "\n")
-            .replace("\r\n", "\n")
-        )
-        if "-----BEGIN PRIVATE KEY-----" in pk and "\n" not in pk[27:-25]:
-          pk = (
-              pk.replace(
-                  "-----BEGIN PRIVATE KEY-----",
-                  "-----BEGIN PRIVATE KEY-----\n",
-              )
-              .replace("-----END PRIVATE KEY-----", "\n-----END PRIVATE KEY-----")
-          )
-        sa_dict["private_key"] = pk
+      sa_dict = {
+          "type": "service_account",
+          "project_id": st.secrets["gcp_project_id"],
+          "private_key_id": st.secrets.get("gcp_private_key_id", "dummy_id"),
+          "private_key": raw_key,
+          "client_email": st.secrets["gcp_client_email"],
+          "token_uri": "https://oauth2.googleapis.com/token",
+      }
 
       creds = service_account.Credentials.from_service_account_info(sa_dict)
       client = genai.Client(
@@ -91,9 +55,9 @@ def init_vertex_client():
           location="us-central1",
           credentials=creds,
       )
-      return client, "Connected via Resilient Base64 Secrets"
+      return client, "Connected via Clean PEM Secrets"
     else:
-      return None, "Error: 'GCP_SA_B64' not found in Streamlit secrets."
+      return None, "Error: Missing GCP secrets in Streamlit configuration."
   except Exception as e:
     return None, f"Authentication Error: {str(e)}"
 
@@ -264,5 +228,3 @@ with tab3:
   if audit_rows:
     for audit in audit_rows:
       st.text(f"[{audit[2]}] {audit[0]}: {audit[1]}️")
-  else:
-    st.info("Audit log is currently empty.")
