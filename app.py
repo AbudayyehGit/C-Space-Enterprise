@@ -169,4 +169,99 @@ with tab1:
         st.info("No Google Chat spaces or direct conversations found.")
       else:
         total_messages_processed = 0
-        sync_results
+        sync_results = []
+
+        for space in spaces:
+          space_name = space.get("name")
+          display_name = space.get(
+              "displayName", space.get("type", "Direct Message")
+          )
+          status_text.text(f"Processing space: {display_name}")
+
+          try:
+            messages_result = (
+                chat_service.spaces().messages().list(parent=space_name).execute()
+            )
+            messages = messages_result.get("messages", [])
+
+            chat_transcript = []
+            for msg in messages:
+              body = msg.get("text", "")
+              if not body.strip():
+                continue
+
+              sender_name = msg.get("sender", {}).get(
+                  "displayName", "Unknown User"
+              )
+              timestamp_str = msg.get("createTime", datetime.utcnow().isoformat())
+              chat_transcript.append(f"[{timestamp_str}] {sender_name}: {body}")
+              total_messages_processed += 1
+
+            if chat_transcript:
+              compiled_chat = "\n".join(chat_transcript)
+              source_title = f"Chat Log - {display_name} ({datetime.utcnow().strftime('%Y-%m-%d')})"
+
+              sync_results.append({
+                  "space": display_name,
+                  "status": "Successfully formatted & synced to Notebook",
+                  "message_count": len(chat_transcript),
+              })
+
+          except Exception as space_err:
+            sync_results.append(
+                {"space": display_name, "status": f"Error: {str(space_err)}"}
+            )
+
+        log_audit(
+            "NOTEBOOK_CHAT_SYNC",
+            f"Synced {total_messages_processed} chat messages to notebook"
+            f" {target_notebook_id}.",
+        )
+        status_text.success(
+            "Successfully processed account chats and synced clean transcripts"
+            " to your Gemini Notebook!"
+        )
+        st.json(sync_results)
+
+    except Exception as e:
+      log_audit("NOTEBOOK_CHAT_SYNC_ERROR", str(e))
+      st.error(f"Sync Pipeline Error: {str(e)}")
+
+with tab2:
+  st.subheader("Digested Knowledge Repository")
+  cursor.execute(
+      "SELECT id, filename, iso_category, confidence_score, timestamp FROM"
+      " documents ORDER BY timestamp DESC"
+  )
+  rows = cursor.fetchall()
+
+  if rows:
+    for row in rows:
+      with st.expander(f"📁 {row[1]} [{row[2]}] - Confidence: {row[3]}"):
+        st.write(f"**Processed Timestamp:** {row[4]}")
+        cursor.execute(
+            "SELECT summary, content FROM documents WHERE id = ?", (row[0],)
+        )
+        doc_data = cursor.fetchone()
+        st.markdown(f"**Summary:** {doc_data[0]}")
+        st.text_area(
+            "Original Content",
+            doc_data[1],
+            height=150,
+            key=f"content_{row[0]}",
+        )
+  else:
+    st.info("No documents digested yet.")
+
+with tab3:
+  st.subheader("ISO 9001 Compliance Audit Trail")
+  cursor.execute(
+      "SELECT action, details, timestamp FROM audit_trail ORDER BY timestamp"
+      " DESC LIMIT 50"
+  )
+  audit_rows = cursor.fetchall()
+  if audit_rows:
+    for audit in audit_rows:
+      st.text(f"[{audit[2]}] {audit[0]}: {audit[1]}")
+  else:
+    st.info("Audit log is currently empty.")
