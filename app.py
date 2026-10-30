@@ -2,6 +2,7 @@ from datetime import datetime
 import io
 import json
 import sqlite3
+import tempfile
 from google import genai
 from google.oauth2 import service_account
 import streamlit as st
@@ -30,7 +31,15 @@ def init_vertex_client():
   try:
     if "gcp_service_account" in st.secrets:
       sa_dict = dict(st.secrets["gcp_service_account"])
-      creds = service_account.Credentials.from_service_account_info(sa_dict)
+
+      # Write raw dict to a temp JSON file to bypass Streamlit TOML PEM parsing bugs
+      with tempfile.NamedTemporaryFile(
+          mode="w", delete=False, suffix=".json"
+      ) as tmp:
+        json.dump(sa_dict, tmp)
+        tmp_path = tmp.name
+
+      creds = service_account.Credentials.from_service_account_file(tmp_path)
 
       client = genai.Client(
           vertexai=True,
