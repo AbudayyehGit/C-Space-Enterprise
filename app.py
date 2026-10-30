@@ -22,67 +22,53 @@ st.caption(
 )
 
 # ==========================================
-# 2. VERTEX AI CLIENT INITIALIZATION
+# 2. FULLY AUTOMATED VERTEX AI INITIALIZATION
 # ==========================================
 
 
 @st.cache_resource
-def init_vertex_client_from_dict(sa_dict):
+def init_vertex_client():
   try:
-    if "private_key" in sa_dict:
-      # Universally normalize escaped backslash-n to actual newlines
-      sa_dict["private_key"] = sa_dict["private_key"].replace("\\n", "\n")
+    if "GCP_SA_JSON" in st.secrets:
+      # Parse the flat string secret automatically
+      sa_json_str = st.secrets["GCP_SA_JSON"]
+      sa_dict = json.loads(sa_json_str)
 
-    with tempfile.NamedTemporaryFile(
-        mode="w", delete=False, suffix=".json"
-    ) as tmp:
-      json.dump(sa_dict, tmp)
-      tmp_path = tmp.name
+      # Ensure private key escaped newlines are properly normalized
+      if "private_key" in sa_dict:
+        sa_dict["private_key"] = sa_dict["private_key"].replace("\\n", "\n")
 
-    creds = service_account.Credentials.from_service_account_file(tmp_path)
-    client = genai.Client(
-        vertexai=True,
-        project=sa_dict["project_id"],
-        location="us-central1",
-        credentials=creds,
-    )
-    return client, "Connected via GCP Service Account (Vertex AI Credits)"
+      with tempfile.NamedTemporaryFile(
+          mode="w", delete=False, suffix=".json"
+      ) as tmp:
+        json.dump(sa_dict, tmp)
+        tmp_path = tmp.name
+
+      creds = service_account.Credentials.from_service_account_file(tmp_path)
+      client = genai.Client(
+          vertexai=True,
+          project=sa_dict["project_id"],
+          location="us-central1",
+          credentials=creds,
+      )
+      return client, "Connected automatically via GCP Service Account Secrets"
+    else:
+      return None, "Error: 'GCP_SA_JSON' not found in Streamlit secrets."
   except Exception as e:
-    return None, f"Auth Error: {str(e)}"
+    return None, f"Authentication Error: {str(e)}"
 
 
-client = None
-auth_status = "Awaiting Authentication"
+client, auth_status = init_vertex_client()
 
 with st.sidebar:
   st.header("System Status")
-
-  # 1. Try loading from st.secrets automatically
-  if "GCP_SA_JSON" in st.secrets:
-    try:
-      sa_dict = json.loads(st.secrets["GCP_SA_JSON"])
-      client, auth_status = init_vertex_client_from_dict(sa_dict)
-    except Exception as e:
-      auth_status = f"Secrets Error: {str(e)}"
-
-  # 2. Fallback: Direct JSON file upload in sidebar
-  if not client:
-    st.warning("Upload your downloaded GCP service_account.json below:")
-    uploaded_sa_file = st.file_uploader(
-        "GCP Service Account JSON", type=["json"]
-    )
-    if uploaded_sa_file:
-      try:
-        sa_dict = json.load(uploaded_sa_file)
-        client, auth_status = init_vertex_client_from_dict(sa_dict)
-      except Exception as e:
-        auth_status = f"File Upload Error: {str(e)}"
-
   if client:
     st.success(auth_status)
   else:
     st.error(auth_status)
-    st.info("Upload your service account JSON above to activate Vertex AI.")
+    st.stop()
+  st.markdown("---")
+  st.info("Target: GCP Trial Credits ($300 Pool)")
 
 
 # ==========================================
@@ -142,9 +128,7 @@ with tab1:
   )
 
   if st.button("Execute Batch Digestion", type="primary"):
-    if not client:
-      st.error("Vertex AI client not connected. Please upload your service account JSON in the sidebar.")
-    elif not uploaded_files:
+    if not uploaded_files:
       st.warning("Please upload at least one document.")
     else:
       progress_bar = st.progress(0)
@@ -240,5 +224,3 @@ with tab3:
   if audit_rows:
     for audit in audit_rows:
       st.text(f"[{audit[2]}] {audit[0]}: {audit[1]}️")
-  else:
-    st.info("Audit log is currently empty.")
