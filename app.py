@@ -5,6 +5,7 @@ import os
 import sqlite3
 from google import genai
 from google.oauth2 import service_account
+from googleapiclient.discovery import build
 import streamlit as st
 
 # ==========================================
@@ -173,10 +174,21 @@ with tab1:
       append_log("Initializing Vertex AI & Google Workspace Chat connection...")
 
       try:
-        from googleapiclient.discovery import build
+        # Define explicit Google Chat API scopes to prevent unauthorized_client errors
+        chat_scopes = [
+            "https://www.googleapis.com/auth/chat.bot",
+            "https://www.googleapis.com/auth/chat.messages",
+            "https://www.googleapis.com/auth/chat.spaces",
+        ]
+        
+        # Reload or scope credentials specifically for the Chat API build
+        chat_creds = service_account.Credentials.from_service_account_info(
+            json.load(open(os.environ["GOOGLE_APPLICATION_CREDENTIALS"])),
+            scopes=chat_scopes
+        )
 
-        chat_service = build("chat", "v1", credentials=creds)
-        append_log("Successfully connected to Workspace Chat API.")
+        chat_service = build("chat", "v1", credentials=chat_creds)
+        append_log("Successfully connected to Workspace Chat API with scopes.")
 
         append_log("Listing available chat spaces and direct messages...")
         spaces_result = chat_service.spaces().list().execute()
