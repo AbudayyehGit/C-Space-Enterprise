@@ -1,3 +1,4 @@
 streamlit
 google-genai
 pytest
+google-api-python-client
